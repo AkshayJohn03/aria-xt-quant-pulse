@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import MarketOverview from '@/components/trading/MarketOverview';
@@ -10,29 +10,12 @@ import ConnectionStatus from '@/components/trading/ConnectionStatus';
 import OptionsChain from '@/components/trading/OptionsChain';
 import TradeLog from '@/components/trading/TradeLog';
 import RiskManagement from '@/components/trading/RiskManagement';
+import ConfigurationPanel from '@/components/trading/ConfigurationPanel';
+import { useMarketData } from '@/hooks/useAriaAPI';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [marketData, setMarketData] = useState({
-    nifty: 19850.25,
-    sensex: 66589.93,
-    marketStatus: 'OPEN',
-    lastUpdate: new Date().toLocaleTimeString()
-  });
-
-  useEffect(() => {
-    // Simulate real-time data updates
-    const interval = setInterval(() => {
-      setMarketData(prev => ({
-        ...prev,
-        nifty: prev.nifty + (Math.random() - 0.5) * 10,
-        sensex: prev.sensex + (Math.random() - 0.5) * 50,
-        lastUpdate: new Date().toLocaleTimeString()
-      }));
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, []);
+  const { marketData } = useMarketData();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-800 text-white">
@@ -49,13 +32,14 @@ const Index = () => {
           {/* Main Content */}
           <div className="xl:col-span-3">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-              <TabsList className="grid w-full grid-cols-6 bg-slate-800/50">
+              <TabsList className="grid w-full grid-cols-7 bg-slate-800/50">
                 <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
                 <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
                 <TabsTrigger value="backtest">Backtest</TabsTrigger>
                 <TabsTrigger value="charts">Charts</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
                 <TabsTrigger value="trades">Trades</TabsTrigger>
+                <TabsTrigger value="config">Config</TabsTrigger>
               </TabsList>
 
               <TabsContent value="dashboard" className="space-y-6">
@@ -84,6 +68,10 @@ const Index = () => {
 
               <TabsContent value="trades">
                 <TradeLog />
+              </TabsContent>
+
+              <TabsContent value="config">
+                <ConfigurationPanel />
               </TabsContent>
             </Tabs>
           </div>
