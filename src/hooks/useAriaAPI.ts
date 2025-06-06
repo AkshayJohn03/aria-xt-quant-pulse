@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { ariaAPI } from '../lib/api/endpoints';
 
@@ -144,7 +143,8 @@ export const useConnectionStatus = () => {
         setStatus(response.data);
         setError(null);
       } else {
-        setError(response.error);
+        // Handle the case where response might have an error property
+        setError('Failed to fetch connection status');
       }
     } catch (err) {
       setError(err.message);
