@@ -1,0 +1,90 @@
+{
+  "apis": {
+    "zerodha": {
+      "api_key": "",
+      "api_secret": "",
+      "access_token": "",
+      "base_url": "https://api.kite.trade"
+    },
+    "twelve_data": {
+      "api_key": "",
+      "base_url": "https://api.twelvedata.com"
+    },
+    "gemini": {
+      "api_key": "",
+      "model": "gemini-2.0-flash-exp",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta"
+    },
+    "telegram": {
+      "bot_token": "",
+      "chat_id": ""
+    }
+  },
+  "trading": {
+    "max_risk_per_trade": 2.5,
+    "trailing_stop_percent": 5.0,
+    "max_positions": 5,
+    "capital_allocation": 100000,
+    "min_confidence_threshold": 75.0,
+    "enable_auto_trading": false
+  },
+  "models": {
+    "ollama": {
+      "base_url": "http://localhost:11434",
+      "model": "qwen2.5:0.5b",
+      "timeout": 30
+    },
+    "aria_lstm": {
+      "model_path": "models/aria_lstm.pth",
+      "sequence_length": 60,
+      "features": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ]
+    },
+    "finbert": {
+      "model_path": "models/finbert-quantized",
+      "max_length": 512
+    },
+    "prophet": {
+      "seasonality_mode": "multiplicative",
+      "yearly_seasonality": true,
+      "weekly_seasonality": true,
+      "daily_seasonality": false
+    },
+    "xgboost": {
+      "model_path": "models/xgboost_model.pkl",
+      "feature_importance_threshold": 0.01
+    }
+  },
+  "data": {
+    "symbols": [
+      "NIFTY50",
+      "BANKNIFTY"
+    ],
+    "timeframes": [
+      "1min",
+      "5min",
+      "15min"
+    ],
+    "max_history_days": 30,
+    "cache_duration_minutes": 5
+  },
+  "risk_management": {
+    "max_drawdown_percent": 15.0,
+    "position_sizing_method": "fixed_percentage",
+    "volatility_adjustment": true,
+    "correlation_threshold": 0.7
+  },
+  "notifications": {
+    "trade_entry": true,
+    "trade_exit": true,
+    "profit_target": true,
+    "stop_loss": true,
+    "system_errors": true,
+    "daily_summary": true
+  }
+}
