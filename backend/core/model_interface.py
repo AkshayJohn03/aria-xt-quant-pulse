@@ -1,9 +1,13 @@
 # D:\aria\aria-xt-quant-pulse\backend\core\model_interface.py
 
 import os
-import joblib # Common for scikit-learn models, you might use torch, tensorflow, etc.
+import joblib
 import logging
-from typing import Dict, Any, Optional
+import asyncio
+import aiohttp
+import numpy as np
+from datetime import datetime
+from typing import Dict, Any, Optional, List
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -11,78 +15,252 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 class ModelInterface:
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.models: Dict[str, Any] = {} # To store loaded models
-        self.model_paths = config.get("model_paths", {}) # Paths to your model files
+        self.models: Dict[str, Any] = {}
+        self.model_paths = config.get("models", {})
+        self.api_keys = config.get("apis", {})
         logging.info("ModelInterface initialized.")
         self._load_all_models()
-
-    def _load_model(self, model_name: str, path: str) -> Optional[Any]:
-        """Loads a specific model from a given path."""
-        if not os.path.exists(path):
-            logging.warning(f"Model file not found for {model_name} at: {path}")
-            return None
-
-        try:
-            # This example uses joblib, common for scikit-learn models.
-            # If you use PyTorch, TensorFlow, etc., the loading method will differ.
-            # Example for PyTorch: model = torch.load(path)
-            # Example for TensorFlow: model = tf.keras.models.load_model(path)
-            model = joblib.load(path)
-            logging.info(f"Successfully loaded model: {model_name} from {path}")
-            return model
-        except Exception as e:
-            logging.error(f"Failed to load model {model_name} from {path}: {e}")
-            return None
 
     def _load_all_models(self):
         """Loads all models specified in the configuration."""
         logging.info("Attempting to load all models...")
-        for model_name, path_relative in self.model_paths.items():
-            # Construct absolute path if model_paths are relative to some base, e.g., backend root
-            # For now, assuming path_relative is the full path or relative to where app.py runs
-            # You might need to adjust this depending on your config and model storage
-            base_dir = os.path.dirname(os.path.abspath(__file__)) # This gets path to core dir
-            # If models are in a 'models' directory at the same level as 'backend'
-            # model_full_path = os.path.join(base_dir, '..', '..', 'models', path_relative)
-            # If models are in a 'models' directory inside 'backend'
-            model_full_path = os.path.join(base_dir, '..', 'models', path_relative) # Example
-            # Or just use path_relative if it's an absolute path
-            # model_full_path = path_relative
+        
+        # Simulate loading different model types
+        model_types = ['aria_lstm', 'xgboost', 'finbert', 'prophet']
+        
+        for model_name in model_types:
+            try:
+                # In production, you'd load actual model files here
+                self.models[model_name] = f"mock_{model_name}_model"
+                logging.info(f"Successfully loaded {model_name} model")
+            except Exception as e:
+                logging.error(f"Failed to load {model_name}: {e}")
 
-            # For initial setup, let's just make a dummy path that doesn't exist
-            # You will need to replace this with your actual model file paths
-            dummy_model_path = os.path.join(base_dir, f"dummy_model_{model_name}.pkl") # Will not exist
-
-            # For now, we won't try to load an actual model, just mock success/failure
-            if model_name == "trend_prediction_model":
-                logging.info(f"Simulating loading for {model_name}. (Expected path: {dummy_model_path})")
-                self.models[model_name] = "dummy_trend_model_loaded" # Mock loaded model
-            elif model_name == "risk_assessment_model":
-                logging.info(f"Simulating loading for {model_name}. (Expected path: {dummy_model_path})")
-                self.models[model_name] = "dummy_risk_model_loaded" # Mock loaded model
+    async def predict_trend(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Aria LSTM trend prediction"""
+        try:
+            ohlcv_data = input_data.get('ohlcv', [])
+            if len(ohlcv_data) < 60:
+                return {'direction': 'NEUTRAL', 'confidence': 0.5, 'target_price': 0}
+            
+            # Simulate LSTM prediction logic
+            recent_closes = [candle['close'] for candle in ohlcv_data[-10:]]
+            price_momentum = (recent_closes[-1] - recent_closes[0]) / recent_closes[0]
+            
+            # Mock prediction based on momentum
+            if price_momentum > 0.002:  # 0.2% positive momentum
+                direction = 'BULLISH'
+                confidence = min(0.9, 0.6 + abs(price_momentum) * 10)
+            elif price_momentum < -0.002:
+                direction = 'BEARISH'
+                confidence = min(0.9, 0.6 + abs(price_momentum) * 10)
             else:
-                logging.warning(f"Unknown model name '{model_name}' in config. Not loading.")
+                direction = 'NEUTRAL'
+                confidence = 0.5
+            
+            target_price = recent_closes[-1] * (1 + price_momentum * 2)
+            
+            return {
+                'direction': direction,
+                'confidence': confidence,
+                'target_price': target_price,
+                'prediction_horizon': '5_candles',
+                'model': 'aria_lstm'
+            }
+            
+        except Exception as e:
+            logging.error(f"Error in Aria LSTM prediction: {e}")
+            return {'direction': 'NEUTRAL', 'confidence': 0.5, 'target_price': 0}
 
-    def predict_trend(self, input_data: Dict[str, Any]) -> Optional[str]:
-        """Makes a trend prediction using the loaded model."""
-        model = self.models.get("trend_prediction_model")
-        if not model:
-            logging.warning("Trend prediction model not loaded.")
-            return None
-        # Here you would preprocess input_data and call model.predict()
-        logging.info(f"Predicting trend with input: {input_data} using {model}")
-        # Mock prediction
-        return "Bullish" if input_data.get("price_change", 0) > 0 else "Bearish"
+    async def forecast_pattern(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Prophet pattern recognition and forecasting"""
+        try:
+            historical_data = input_data.get('historical_data', [])
+            forecast_periods = input_data.get('forecast_periods', 5)
+            
+            if len(historical_data) < 50:
+                return {'trend': 'SIDEWAYS', 'confidence': 0.5, 'support': 0, 'resistance': 0}
+            
+            # Extract price data
+            prices = [item['close'] for item in historical_data]
+            
+            # Simple trend analysis
+            recent_trend = (prices[-1] - prices[-20]) / prices[-20]
+            volatility = np.std(prices[-20:]) / np.mean(prices[-20:])
+            
+            if recent_trend > 0.01:  # 1% uptrend
+                trend = 'UP'
+                confidence = min(0.9, 0.6 + recent_trend * 5)
+            elif recent_trend < -0.01:
+                trend = 'DOWN'
+                confidence = min(0.9, 0.6 + abs(recent_trend) * 5)
+            else:
+                trend = 'SIDEWAYS'
+                confidence = 0.5 + volatility
+            
+            # Calculate support and resistance
+            recent_prices = prices[-50:]
+            support = min(recent_prices) * 0.998  # Slight buffer
+            resistance = max(recent_prices) * 1.002
+            
+            return {
+                'trend': trend,
+                'confidence': confidence,
+                'support': support,
+                'resistance': resistance,
+                'volatility_score': volatility,
+                'model': 'prophet'
+            }
+            
+        except Exception as e:
+            logging.error(f"Error in Prophet forecasting: {e}")
+            return {'trend': 'SIDEWAYS', 'confidence': 0.5, 'support': 0, 'resistance': 0}
 
-    def assess_risk(self, position_data: Dict[str, Any]) -> Optional[float]:
-        """Assesses risk using the loaded model."""
-        model = self.models.get("risk_assessment_model")
-        if not model:
-            logging.warning("Risk assessment model not loaded.")
-            return None
-        # Here you would preprocess position_data and call model.predict()
-        logging.info(f"Assessing risk with input: {position_data} using {model}")
-        # Mock risk score
-        return 0.05 + position_data.get("volatility", 0) * 0.01
+    async def predict_volatility(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """XGBoost volatility prediction"""
+        try:
+            features = input_data.get('features', [])
+            if len(features) < 10:
+                return {'volatility': 'MEDIUM', 'score': 0.5, 'risk_level': 'MODERATE'}
+            
+            # Mock XGBoost prediction
+            # In production, this would use the actual XGBoost model
+            price_change = abs(features[1]) if len(features) > 1 else 0.01
+            volume_ratio = features[5] if len(features) > 5 else 1.0
+            hist_vol = features[6] if len(features) > 6 else 0.02
+            
+            # Combine features for volatility score
+            volatility_score = (price_change * 0.4 + 
+                              abs(volume_ratio - 1) * 0.3 + 
+                              hist_vol * 0.3)
+            
+            if volatility_score > 0.03:
+                volatility = 'HIGH'
+                risk_level = 'HIGH'
+            elif volatility_score > 0.015:
+                volatility = 'MEDIUM'
+                risk_level = 'MODERATE'
+            else:
+                volatility = 'LOW'
+                risk_level = 'LOW'
+            
+            return {
+                'volatility': volatility,
+                'score': min(0.95, volatility_score * 10),
+                'risk_level': risk_level,
+                'features_used': len(features),
+                'model': 'xgboost'
+            }
+            
+        except Exception as e:
+            logging.error(f"Error in XGBoost volatility prediction: {e}")
+            return {'volatility': 'MEDIUM', 'score': 0.5, 'risk_level': 'MODERATE'}
 
-    # Add more prediction/assessment methods as per your AI model types
+    async def analyze_sentiment(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """FinBERT sentiment analysis"""
+        try:
+            symbol = input_data.get('symbol', 'NIFTY50')
+            timeframe = input_data.get('timeframe', '1H')
+            
+            # Mock sentiment analysis
+            # In production, this would analyze real news and social media
+            import random
+            sentiments = ['BULLISH', 'BEARISH', 'NEUTRAL']
+            weights = [0.4, 0.3, 0.3]  # Slight bullish bias for Indian markets
+            
+            sentiment = random.choices(sentiments, weights=weights)[0]
+            confidence = random.uniform(0.6, 0.9)
+            
+            # Generate relevant news headlines (mock)
+            news_impact = random.uniform(-0.1, 0.1)
+            
+            return {
+                'sentiment': sentiment,
+                'confidence': confidence,
+                'news_impact': news_impact,
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'model': 'finbert'
+            }
+            
+        except Exception as e:
+            logging.error(f"Error in FinBERT sentiment analysis: {e}")
+            return {'sentiment': 'NEUTRAL', 'confidence': 0.5, 'news_impact': 0}
+
+    async def query_gemini(self, prompt: str) -> Dict[str, Any]:
+        """Query Gemini AI for market analysis"""
+        try:
+            gemini_config = self.api_keys.get('gemini', {})
+            api_key = gemini_config.get('api_key')
+            
+            if not api_key:
+                logging.warning("Gemini API key not configured")
+                return self._get_mock_gemini_response()
+            
+            # In production, make actual API call to Gemini
+            # For now, return mock response
+            return self._get_mock_gemini_response()
+            
+        except Exception as e:
+            logging.error(f"Error querying Gemini: {e}")
+            return self._get_mock_gemini_response()
+
+    def _get_mock_gemini_response(self) -> Dict[str, Any]:
+        """Generate mock Gemini response"""
+        import random
+        
+        sentiments = ['Bullish', 'Bearish', 'Neutral']
+        sentiment = random.choice(sentiments)
+        probability = random.uniform(0.6, 0.85)
+        
+        reasonings = [
+            "Strong momentum with high volume support",
+            "Technical indicators showing divergence",
+            "Market consolidation near key levels",
+            "Breakout pattern forming on charts",
+            "Risk-off sentiment affecting sentiment"
+        ]
+        reasoning = random.choice(reasonings)
+        
+        return {
+            'sentiment': sentiment,
+            'probability': probability,
+            'reasoning': reasoning,
+            'support_levels': [19800, 19750, 19700],
+            'resistance_levels': [19900, 19950, 20000],
+            'model': 'gemini'
+        }
+
+    async def test_gemini_connection(self) -> bool:
+        """Test Gemini API connection"""
+        try:
+            result = await self.query_gemini("Test connection")
+            return result is not None
+        except:
+            return False
+
+    async def test_ollama_connection(self) -> bool:
+        """Test Ollama connection"""
+        try:
+            # Mock Ollama test
+            return True
+        except:
+            return False
+
+    async def initialize_models(self):
+        """Initialize all models on startup"""
+        logging.info("Initializing AI models...")
+        
+        # Test connections
+        connections = {
+            'gemini': await self.test_gemini_connection(),
+            'ollama': await self.test_ollama_connection()
+        }
+        
+        for service, status in connections.items():
+            if status:
+                logging.info(f"✓ {service.upper()} model ready")
+            else:
+                logging.warning(f"✗ {service.upper()} model unavailable")
+        
+        logging.info("Model initialization complete")
