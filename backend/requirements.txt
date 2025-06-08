@@ -1,64 +1,44 @@
-
 # Web Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
+fastapi==0.95.0
+uvicorn[standard]==0.20.0
+pydantic==1.10.12 # Pydantic v1.x for Python 3.9
 
 # Data Processing & Analysis
-pandas==2.1.3
-numpy==1.25.2
-scipy==1.11.4
+pandas==1.5.3
+numpy==1.24.4
+scipy==1.10.1
 
 # Machine Learning & AI
-torch==2.1.1
-scikit-learn==1.3.2
-joblib==1.3.2
-xgboost==2.0.2
-prophet==1.1.5
+torch==1.13.1+cpu # Using CPU version for broader compatibility. If you have CUDA enabled, specify your CUDA version (e.g., torch==2.0.1+cu118)
+scikit-learn==1.2.2
+joblib==1.2.0
+xgboost==1.7.6
+prophet==1.1.0
 
 # Technical Analysis
-TA-Lib==0.4.28
+TA-Lib==0.4.24 # Important: TA-Lib can be tricky on Windows. You might need to manually download a .whl file for Python 3.9 from https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib and install it via `pip install path/to/your/TA_Lib*.whl` if this fails.
 
 # API & HTTP Requests
 requests==2.31.0
-httpx==0.25.2
-aiohttp==3.9.1
+httpx==0.23.3
+aiohttp==3.8.6
 
 # Telegram Integration
-python-telegram-bot==20.7
+python-telegram-bot==13.15 # Version 20.x requires Python 3.10+
 
-# Data Storage & Serialization
-sqlite3
-pickle-mixin==1.0.2
+# Google Generative AI (Gemini)
+google-generativeai # Let pip find latest compatible for P3.9
+
+# Ollama (Qwen2.5 client)
+ollama # Let pip find latest compatible for P3.9
+
+# Web Scraping
+beautifulsoup4
 
 # Utilities
 tqdm==4.66.1
 python-dotenv==1.0.0
-python-multipart==0.0.6
+python-multipart==0.0.6 # FastAPI dependency for file uploads (forms)
 
-# Financial Data & APIs
-yfinance==0.2.28
-alpha-vantage==2.3.1
-
-# Quantitative Finance
-quantlib==1.32
-
-# Development & Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-
-# CORS for web integration
-python-cors==1.7.0
-
-# Environment & Configuration
+# Configuration (often sub-dependencies, but good to list explicitly if issues arise)
 pyyaml==6.0.1
-configparser==6.0.0
-
-# Logging & Monitoring
-structlog==23.2.0
-
-# Data Validation
-marshmallow==3.20.1
-
-# Async support
-asyncio

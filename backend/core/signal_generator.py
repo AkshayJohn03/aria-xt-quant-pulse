@@ -1,4 +1,3 @@
-
 # D:\aria\aria-xt-quant-pulse\backend\core\signal_generator.py
 
 import logging
@@ -72,61 +71,81 @@ class SignalGenerator:
         
         return signals
 
+    def set_strategy_params(self, **kwargs):
+        """Dynamically update strategy parameters (for live tuning or optimization)."""
+        for k, v in kwargs.items():
+            if hasattr(self, k):
+                setattr(self, k, v)
+                logging.info(f"Strategy parameter '{k}' updated to {v}")
+
+    async def backtest_signals(self, historical_data: List[Dict], option_chain: List[Dict]) -> List[Dict[str, Any]]:
+        """Simulate signal generation on historical data for validation and optimization."""
+        results = []
+        for i in range(50, len(historical_data)):
+            window_data = historical_data[:i]
+            market_data = {'ohlcv_5min': window_data}
+            signals = await self.generate_signals(market_data, option_chain)
+            if signals:
+                results.extend(signals)
+        logging.info(f"Backtest generated {len(results)} signals.")
+        return results
+
     def _prepare_dataframe(self, ohlcv_data: List[Dict]) -> pd.DataFrame:
-        """Convert OHLCV data to pandas DataFrame"""
         df = pd.DataFrame(ohlcv_data)
-        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', errors='coerce')
         df.set_index('timestamp', inplace=True)
-        df = df.astype(float)
+        df = df.apply(pd.to_numeric, errors='coerce')
+        df = df.fillna(method='ffill').fillna(method='bfill')
         return df.sort_index()
 
     def _calculate_technical_indicators(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate all required technical indicators"""
         indicators = {}
-        
-        # RSI
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        indicators['rsi'] = 100 - (100 / (1 + rs))
-        
-        # MACD
-        ema12 = df['close'].ewm(span=12).mean()
-        ema26 = df['close'].ewm(span=26).mean()
-        indicators['macd'] = ema12 - ema26
-        indicators['macd_signal'] = indicators['macd'].ewm(span=9).mean()
-        indicators['macd_histogram'] = indicators['macd'] - indicators['macd_signal']
-        
-        # Bollinger Bands
-        sma20 = df['close'].rolling(window=20).mean()
-        std20 = df['close'].rolling(window=20).std()
-        indicators['bb_upper'] = sma20 + (std20 * 2)
-        indicators['bb_lower'] = sma20 - (std20 * 2)
-        indicators['bb_middle'] = sma20
-        indicators['bb_width'] = (indicators['bb_upper'] - indicators['bb_lower']) / indicators['bb_middle']
-        
-        # ATR
-        high_low = df['high'] - df['low']
-        high_close = np.abs(df['high'] - df['close'].shift())
-        low_close = np.abs(df['low'] - df['close'].shift())
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = ranges.max(axis=1)
-        indicators['atr'] = true_range.rolling(window=14).mean()
-        
-        # EMAs
-        indicators['ema9'] = df['close'].ewm(span=9).mean()
-        indicators['ema21'] = df['close'].ewm(span=21).mean()
-        indicators['ema50'] = df['close'].ewm(span=50).mean()
-        
-        # Volume indicators
-        indicators['volume_sma'] = df['volume'].rolling(window=20).mean()
-        indicators['volume_spike'] = df['volume'] / indicators['volume_sma']
-        
-        # VWAP
-        typical_price = (df['high'] + df['low'] + df['close']) / 3
-        indicators['vwap'] = (typical_price * df['volume']).cumsum() / df['volume'].cumsum()
-        
+        try:
+            # RSI
+            delta = df['close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / (loss.replace(0, np.nan))
+            indicators['rsi'] = 100 - (100 / (1 + rs))
+            
+            # MACD
+            ema12 = df['close'].ewm(span=12).mean()
+            ema26 = df['close'].ewm(span=26).mean()
+            indicators['macd'] = ema12 - ema26
+            indicators['macd_signal'] = indicators['macd'].ewm(span=9).mean()
+            indicators['macd_histogram'] = indicators['macd'] - indicators['macd_signal']
+            
+            # Bollinger Bands
+            sma20 = df['close'].rolling(window=20).mean()
+            std20 = df['close'].rolling(window=20).std()
+            indicators['bb_upper'] = sma20 + (std20 * 2)
+            indicators['bb_lower'] = sma20 - (std20 * 2)
+            indicators['bb_middle'] = sma20
+            indicators['bb_width'] = (indicators['bb_upper'] - indicators['bb_lower']) / indicators['bb_middle']
+            
+            # ATR
+            high_low = df['high'] - df['low']
+            high_close = np.abs(df['high'] - df['close'].shift())
+            low_close = np.abs(df['low'] - df['close'].shift())
+            ranges = pd.concat([high_low, high_close, low_close], axis=1)
+            true_range = ranges.max(axis=1)
+            indicators['atr'] = true_range.rolling(window=14).mean()
+            
+            # EMAs
+            indicators['ema9'] = df['close'].ewm(span=9).mean()
+            indicators['ema21'] = df['close'].ewm(span=21).mean()
+            indicators['ema50'] = df['close'].ewm(span=50).mean()
+            
+            # Volume indicators
+            indicators['volume_sma'] = df['volume'].rolling(window=20).mean()
+            indicators['volume_spike'] = df['volume'] / indicators['volume_sma']
+            
+            # VWAP
+            typical_price = (df['high'] + df['low'] + df['close']) / 3
+            indicators['vwap'] = (typical_price * df['volume']).cumsum() / df['volume'].cumsum()
+            
+        except Exception as e:
+            logging.error(f"Error calculating technical indicators: {e}")
         return indicators
 
     async def _get_ai_predictions(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -430,27 +449,30 @@ class SignalGenerator:
         return round(stop_loss, 2), round(target, 2)
 
     def _generate_reasoning(self, confluence: Dict) -> str:
-        """Generate human-readable reasoning for the signal"""
         direction = confluence['direction']
         score = confluence['score']
         signals = confluence['bullish_signals'] if direction == 'BULLISH' else confluence['bearish_signals']
         total = confluence['total_signals']
-        
-        reasoning = f"{direction} signal with {score:.1%} confidence ({signals}/{total} indicators aligned). "
-        
         context = confluence['market_context']
-        if context.get('trend_bullish'):
-            reasoning += "Bullish trend confirmed. "
-        if context.get('volume_spike'):
-            reasoning += "Volume spike detected. "
-        if context.get('bb_squeeze'):
-            reasoning += "Bollinger Band squeeze suggests breakout. "
-        
         ai_preds = confluence['ai_predictions']
+        reasoning = [
+            f"{direction} signal with {score:.1%} confidence ({signals}/{total} indicators aligned)."
+        ]
+        if context.get('trend_bullish'):
+            reasoning.append("Bullish trend confirmed.")
+        if context.get('volume_spike'):
+            reasoning.append("Volume spike detected.")
+        if context.get('bb_squeeze'):
+            reasoning.append("Bollinger Band squeeze suggests breakout.")
+        if context.get('high_volatility'):
+            reasoning.append("High volatility regime.")
         if ai_preds.get('aria_lstm', {}).get('confidence', 0) > 0.7:
-            reasoning += "Strong AI model conviction. "
-        
-        return reasoning.strip()
+            reasoning.append("Strong AI model conviction.")
+        if ai_preds.get('finbert', {}).get('sentiment', '').upper() == 'BULLISH':
+            reasoning.append("Positive news sentiment.")
+        if ai_preds.get('gemini', {}).get('analysis', '').startswith('BULLISH'):
+            reasoning.append("Gemini LLM bullish context.")
+        return ' '.join(reasoning)
 
     def _get_default_predictions(self) -> Dict[str, Any]:
         """Default predictions when AI models fail"""
