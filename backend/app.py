@@ -8,9 +8,7 @@ from typing import Optional, Dict, Any, List
 import os
 from dotenv import load_dotenv
 import random # Import random for mock backtest
-
-# Import routers
-from api.endpoints import router as api_router
+from fastapi.middleware.cors import CORSMiddleware # Import CORS
 
 # Import core components
 from core.config_manager import ConfigManager
@@ -283,7 +281,8 @@ async def run_backtest_logic_helper(data: List[Dict], strategy: str, model_inter
     }
 
 
-# Include API routes
+# Import API routes after global instances are defined
+from api.endpoints import router as api_router
 app.include_router(api_router, prefix="/api/v1")
 
 if __name__ == "__main__":

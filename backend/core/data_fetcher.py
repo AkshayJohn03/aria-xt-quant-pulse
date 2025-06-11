@@ -36,77 +36,42 @@ class DataFetcher:
 
     async def fetch_market_data(self) -> Dict[str, Any]:
         """
-        Fetches real-time market data for NIFTY and SENSEX from Zerodha.
-        Also includes a placeholder for AI Sentiment.
+        Fetches real-time market data for NIFTY 50 and SENSEX using KiteConnect.
+        Returns a dict with current value, change, and percentChange for each index.
         """
-        # Initialize with more realistic mock values as fallback
-        nifty_data = {"value": 22000.00, "change": 50.00, "percentChange": 0.23}
-        sensex_data = {"value": 73000.00, "change": -100.00, "percentChange": -0.14}
-        market_status = "CLOSED"
-        last_update = datetime.now().isoformat()
+        if not hasattr(self, 'kite') or self.kite is None:
+            # Try to get kite from config_manager or raise error
+            from kiteconnect import KiteConnect
+            api_key = self.config_manager.config.get('apis', {}).get('zerodha', {}).get('api_key')
+            access_token = self.config_manager.config.get('apis', {}).get('zerodha', {}).get('access_token')
+            if not api_key or not access_token:
+                raise RuntimeError("Zerodha API key or access token not set in config.")
+            self.kite = KiteConnect(api_key=api_key)
+            self.kite.set_access_token(access_token)
 
-        # Dummy AI sentiment for now, will come from ModelInterface later
-        ai_sentiment = {"direction": "NEUTRAL", "confidence": 50}
-
-        if self.kite:
-            try:
-                nifty_instrument_token = self.config_manager.get("data.nifty_instrument_token", None)
-                sensex_instrument_token = self.config_manager.get("data.sensex_instrument_token", None)
-                
-                if not nifty_instrument_token or not sensex_instrument_token:
-                    logger.warning("NIFTY or SENSEX instrument tokens not configured in config.json. Cannot fetch live market data from Zerodha. Returning mock data.")
-                    return {
-                        "nifty": nifty_data,
-                        "sensex": sensex_data,
-                        "marketStatus": market_status,
-                        "lastUpdate": last_update,
-                        "aiSentiment": ai_sentiment
+        # Instrument tokens for NIFTY 50 and SENSEX
+        nifty_token = int(self.config_manager.config.get('data', {}).get('nifty_instrument_token', 256265))
+        sensex_token = int(self.config_manager.config.get('data', {}).get('sensex_instrument_token', 265))
+        tokens = [nifty_token, sensex_token]
+        try:
+            ltp_data = await asyncio.to_thread(self.kite.ltp, 'NSE', [nifty_token, sensex_token])
+            # ltp_data is a dict: { 'NSE:256265': {...}, 'NSE:265': {...} }
+            result = {}
+            for token, label in zip(tokens, ['nifty', 'sensex']):
+                key = f'NSE:{token}'
+                if key in ltp_data:
+                    last_price = ltp_data[key]['last_price']
+                    change = ltp_data[key].get('change', 0)
+                    percent_change = ltp_data[key].get('net_change', 0)
+                    result[label] = {
+                        'value': last_price,
+                        'change': change,
+                        'percentChange': percent_change
                     }
-                
-                instrument_list = [nifty_instrument_token, sensex_instrument_token]
-                quotes = await asyncio.to_thread(self.kite.ltp, instrument_list)
-                
-                # --- DEBUG LOGGING ---
-                logger.debug(f"Raw Zerodha LTP response for {instrument_list}: {quotes}")
-                # --- END DEBUG LOGGING ---
-
-                if nifty_instrument_token in quotes:
-                    nifty_quote = quotes[nifty_instrument_token]
-                    nifty_data["value"] = nifty_quote.get("last_price", nifty_data["value"])
-                    nifty_data["change"] = nifty_quote.get("change", nifty_data["change"])
-                    nifty_prev_close = nifty_quote.get("ohlc", {}).get("close")
-                    if nifty_prev_close and nifty_prev_close != 0:
-                        nifty_data["percentChange"] = (nifty_data["change"] / nifty_prev_close) * 100
-                    else:
-                        nifty_data["percentChange"] = nifty_quote.get("net_change", nifty_data["percentChange"])
-
-                if sensex_instrument_token in quotes:
-                    sensex_quote = quotes[sensex_instrument_token]
-                    sensex_data["value"] = sensex_quote.get("last_price", sensex_data["value"])
-                    sensex_data["change"] = sensex_quote.get("change", sensex_data["change"])
-                    sensex_prev_close = sensex_quote.get("ohlc", {}).get("close")
-                    if sensex_prev_close and sensex_prev_close != 0:
-                        sensex_data["percentChange"] = (sensex_data["change"] / sensex_prev_close) * 100
-                    else:
-                        sensex_data["percentChange"] = sensex_quote.get("net_change", sensex_data["percentChange"])
-
-                if nifty_data["value"] != 0 and sensex_data["value"] != 0:
-                    market_status = "OPEN"
-                last_update = datetime.now().isoformat()
-
-            except Exception as e:
-                logger.error(f"Error fetching real market data from Zerodha: {e}. Falling back to mock data.")
-                pass 
-        else:
-            logger.warning("KiteConnect client not initialized. Cannot fetch live market data from Zerodha. Returning mock data.")
-
-        return {
-            "nifty": nifty_data,
-            "sensex": sensex_data,
-            "marketStatus": market_status,
-            "lastUpdate": last_update,
-            "aiSentiment": ai_sentiment
-        }
+            return result
+        except Exception as e:
+            logging.error(f"Failed to fetch market data from Zerodha: {e}")
+            return {}
 
     async def fetch_live_ohlcv(self, symbol: str = "NIFTY50", timeframe: str = "1min", limit: int = 100) -> List[Dict]:
         """

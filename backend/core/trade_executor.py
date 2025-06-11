@@ -276,13 +276,15 @@ class TradeExecutor:
     """
     Manages connections to brokerage APIs, places orders, and fetches trade-related data.
     """
-    def __init__(self, config: Dict[str, Any], risk_manager):
+    def __init__(self, config: Dict[str, Any], risk_manager: Any, telegram_notifier: Any):
         self.config = config
         self.risk_manager = risk_manager
+        self.telegram_notifier = telegram_notifier # Store the notifier
+        self.live_trading_enabled = config.get("trading.live_trading_enabled", False)
+        self.broker = None  # Will be set in connect_to_broker or _initialize_broker
         self.connected = False
-        self.broker_client: Optional[BrokerBase] = None
 
-        logging.info("TradeExecutor initialized.")
+        logging.info(f"TradeExecutor initialized. Live trading enabled: {self.live_trading_enabled}")
 
     async def connect_to_broker(self) -> bool:
         """Connect to the specified brokerage API."""
@@ -372,3 +374,21 @@ class TradeExecutor:
         if not self.broker_client:
             return False
         return await self.broker_client.square_off_position(symbol, quantity, product_type)
+
+    async def get_portfolio_overview(self) -> Dict[str, Any]:
+        """
+        Fetches live portfolio details (positions, holdings, funds) from Zerodha and returns a summary dict.
+        """
+        positions = await self.get_positions() or []
+        holdings = await self.get_holdings() or []
+        funds = await self.get_funds() or {}
+        total_value = sum([p.get('current_price', 0) * abs(p.get('quantity', 0)) for p in positions])
+        total_holdings_value = sum([h.get('last_price', 0) * abs(h.get('quantity', 0)) for h in holdings])
+        return {
+            'positions': positions,
+            'holdings': holdings,
+            'funds': funds,
+            'total_value': total_value + total_holdings_value + funds.get('available_cash', 0),
+            'positions_count': len(positions),
+            'holdings_count': len(holdings)
+        }

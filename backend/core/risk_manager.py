@@ -159,4 +159,3 @@ class RiskManager:
             "free_margin": random.uniform(40000.0, 50000.0),
             "used_margin": random.uniform(5000.0, 10000.0)
         }
-

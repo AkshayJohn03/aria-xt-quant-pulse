@@ -8,8 +8,11 @@ from core.config_manager import ConfigManager
 from core.data_fetcher import DataFetcher
 from core.model_interface import ModelInterface
 from core.risk_manager import RiskManager
+from core.trade_executor import TradeExecutor
+
 # Import global instances from app.py to ensure singletons are used
-from app import config_manager, data_fetcher, model_interface, risk_manager, signal_generator, trade_executor, telegram_notifier, system_status
+# IMPORTANT: These imports must be after config_manager, data_fetcher, etc. are defined in app.py
+from app import config_manager, data_fetcher, model_interface, risk_manager, signal_generator, trade_executor, telegram_notifier, system_status, run_backtest_logic_helper
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +70,27 @@ async def validate_config(config: ConfigManager = Depends(get_config_manager_dep
 
 # --- Market data endpoints ---
 @router.get("/market-data")
-async def get_market_data(data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)):
-    """Get current market data"""
+async def get_market_data():
+    """Get current market data (NIFTY 50, SENSEX) from Zerodha."""
     try:
-        market_data = await data_fetcher_inst.fetch_market_data()
-        return JSONResponse(content={"success": True, "data": market_data, "error": None})
+        from app import data_fetcher
+        data = await data_fetcher.fetch_market_data()
+        # Ensure both keys are present, even if one or both are missing
+        result = {
+            "nifty": data.get("nifty") if data and "nifty" in data else {"value": None, "change": None, "percentChange": None},
+            "sensex": data.get("sensex") if data and "sensex" in data else {"value": None, "change": None, "percentChange": None},
+            "lastUpdate": datetime.now().isoformat()
+        }
+        return JSONResponse(content={"success": True, "data": result, "error": None})
     except Exception as e:
-        logger.error(f"Error fetching market data: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        logging.error(f"Error fetching market data: {e}")
+        # Always return both keys with None values on error
+        result = {
+            "nifty": {"value": None, "change": None, "percentChange": None},
+            "sensex": {"value": None, "change": None, "percentChange": None},
+            "lastUpdate": datetime.now().isoformat()
+        }
+        return JSONResponse(content={"success": False, "data": result, "error": str(e)}, status_code=500)
 
 @router.get("/ohlcv/{symbol}")
 async def get_ohlcv_data(
@@ -165,19 +181,14 @@ async def generate_trading_signal(
 
 # --- Portfolio and risk management endpoints ---
 @router.get("/portfolio")
-async def get_portfolio(risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)):
-    """Get current portfolio status"""
+async def get_portfolio():
+    """Get live portfolio overview (positions, holdings, funds) from Zerodha."""
     try:
-        # These methods are now present in RiskManager (as placeholders)
-        portfolio = {
-            "positions": risk_manager_inst.get_positions(),
-            "risk_metrics": risk_manager_inst.calculate_risk_metrics(),
-            "total_pnl": risk_manager_inst.calculate_total_pnl(),
-            "open_positions_count": len(risk_manager_inst.get_open_positions()) # Renamed for clarity
-        }
-        return JSONResponse(content={"success": True, "data": portfolio, "error": None})
+        from app import trade_executor
+        data = await trade_executor.get_portfolio_overview()
+        return JSONResponse(content={"success": True, "data": data, "error": None})
     except Exception as e:
-        logger.error(f"Error fetching portfolio: {e}")
+        logging.error(f"Error fetching portfolio: {e}")
         return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.get("/positions")
@@ -224,10 +235,7 @@ async def run_backtest(
             symbol, start_date, end_date
         )
         
-        # We need to import run_backtest_logic from app.py or move it here
-        # For now, let's assume it's moved or accessible
-        from app import run_backtest_logic_helper # Renamed for clarity in app.py
-
+        # Use the imported run_backtest_logic_helper
         backtest_results = await run_backtest_logic_helper(
             historical_data, strategy, model_interface_inst
         )
@@ -256,7 +264,6 @@ async def run_live_backtest(
 ):
     """Run backtest with live data from the last N hours"""
     try:
-        # from app import run_backtest_logic_helper # Already imported if above
         
         live_data = await data_fetcher_inst.fetch_live_ohlcv(
             symbol, "1min", hours * 60
@@ -287,21 +294,33 @@ async def get_connection_status(
     data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
     model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
 ):
-    """Get status of all external connections"""
+    """Get status of all external connections (robust to partial failures)"""
+    status = {}
+    # Zerodha
     try:
-        status = {
-            "zerodha": await data_fetcher_inst.test_zerodha_connection(),
-            "twelve_data": await data_fetcher_inst.test_twelve_data_connection(),
-            "gemini": await model_interface_inst.test_gemini_connection(),
-            "ollama": await model_interface_inst.test_ollama_connection(),
-            "last_update": datetime.now().isoformat()
-        }
-        
-        # Ensure all values are boolean for all()
-        overall_health = all(s for key, s in status.items() if key != "last_update")
-
-        return JSONResponse(content={"success": True, "data": {"connections": status, "overall_health": overall_health}, "error": None})
+        status["zerodha"] = await data_fetcher_inst.test_zerodha_connection()
     except Exception as e:
-        logger.error(f"Error checking connection status: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
+        logger.error(f"Zerodha connection check failed: {e}")
+        status["zerodha"] = False
+    # Twelve Data
+    try:
+        status["twelve_data"] = await data_fetcher_inst.test_twelve_data_connection()
+    except Exception as e:
+        logger.error(f"Twelve Data connection check failed: {e}")
+        status["twelve_data"] = False
+    # Gemini
+    try:
+        status["gemini"] = await model_interface_inst.test_gemini_connection()
+    except Exception as e:
+        logger.error(f"Gemini connection check failed: {e}")
+        status["gemini"] = False
+    # Ollama
+    try:
+        status["ollama"] = await model_interface_inst.test_ollama_connection()
+    except Exception as e:
+        logger.error(f"Ollama connection check failed: {e}")
+        status["ollama"] = False
+    status["last_update"] = datetime.now().isoformat()
+    # Ensure all values are boolean for all()
+    overall_health = all(s for key, s in status.items() if key != "last_update")
+    return JSONResponse(content={"success": True, "data": {"connections": status, "overall_health": overall_health}, "error": None})
