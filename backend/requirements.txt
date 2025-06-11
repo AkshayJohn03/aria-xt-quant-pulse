@@ -1,44 +1,60 @@
-# Web Framework
-fastapi==0.95.0
-uvicorn[standard]==0.20.0
-pydantic==1.10.12 # Pydantic v1.x for Python 3.9
+# Project Dependencies for Aria-xT Quant Pulse Backend (Python 3.11.x Compatible)
+
+# Web Framework (FastAPI)
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.7.1
+python-dotenv==1.0.1
+python-multipart==0.0.9 # For handling form data (e.g., file uploads)
 
 # Data Processing & Analysis
-pandas==1.5.3
-numpy==1.24.4
-scipy==1.10.1
+pandas==2.2.2
+numpy==1.26.4
+scipy==1.13.0
 
-# Machine Learning & AI
-torch==1.13.1+cpu # Using CPU version for broader compatibility. If you have CUDA enabled, specify your CUDA version (e.g., torch==2.0.1+cu118)
-scikit-learn==1.2.2
-joblib==1.2.0
-xgboost==1.7.6
-prophet==1.1.0
+# Machine Learning & AI Models
+# Note: For PyTorch (torch), this specifies the CPU-only version.
+# If you have an NVIDIA GPU and CUDA installed, follow the instructions on
+# the PyTorch website (https://pytorch.org/get-started/locally/) to install
+# the GPU-enabled version AFTER running `pip install -r requirements.txt`.
+# Example for CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch==2.3.0
+scikit-learn==1.4.2
+joblib==1.4.2
+xgboost==2.0.2
+prophet==1.1.5 # Note: Prophet depends on pystan, which can sometimes be tricky to install.
+              # If you encounter issues, refer to Prophet's installation guide.
 
 # Technical Analysis
-TA-Lib==0.4.24 # Important: TA-Lib can be tricky on Windows. You might need to manually download a .whl file for Python 3.9 from https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib and install it via `pip install path/to/your/TA_Lib*.whl` if this fails.
+# IMPORTANT: TA-Lib can be challenging to install directly via pip on Windows.
+# If `pip install TA-Lib` fails, you will likely need to:
+# 1. Manually download the pre-compiled .whl file for Python 3.11 (cp311)
+#    from Christoph Gohlke's website: https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib
+#    Look for something like: `TA_Lib‑0.4.28‑cp311‑cp311‑win_amd64.whl`
+# 2. Save it to your project root (e.g., D:\aria\aria-xt-quant-pulse\)
+# 3. Then, install it using:
+#    pip install "D:\aria\aria-xt-quant-pulse\TA_Lib‑0.4.28‑cp311‑cp311‑win_amd64.whl"
+#TA-Lib==0.4.28
 
-# API & HTTP Requests
-requests==2.31.0
-httpx==0.23.3
-aiohttp==3.8.6
+# API Clients & HTTP Requests
+requests==2.32.3
+httpx==0.27.0
+aiohttp==3.9.5
 
 # Telegram Integration
-python-telegram-bot==13.15 # Version 20.x requires Python 3.10+
+python-telegram-bot==21.0 # Compatible with Python 3.10+
 
 # Google Generative AI (Gemini)
-google-generativeai # Let pip find latest compatible for P3.9
+google-generativeai==0.7.0
 
 # Ollama (Qwen2.5 client)
-ollama # Let pip find latest compatible for P3.9
+ollama==0.1.8 # Or check Ollama's official documentation for the latest client version
 
-# Web Scraping
-beautifulsoup4
+# Web Scraping Utilities
+beautifulsoup4==4.12.3
 
-# Utilities
-tqdm==4.66.1
-python-dotenv==1.0.0
-python-multipart==0.0.6 # FastAPI dependency for file uploads (forms)
+# Broker Integration
+kiteconnect==5.0.1
 
-# Configuration (often sub-dependencies, but good to list explicitly if issues arise)
+# Configuration & Logging
 pyyaml==6.0.1

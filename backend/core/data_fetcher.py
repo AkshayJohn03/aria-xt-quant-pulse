@@ -1,140 +1,148 @@
-# D:\aria\aria-xt-quant-pulse\backend\core\data_fetcher.py
-
-import requests
-import pandas as pd
-import os
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
 import logging
+from typing import Dict, Any, List, Optional
+from core.config_manager import ConfigManager # Assuming ConfigManager is in core
+# Import KiteConnect if you intend to use it for real connections
+# from kiteconnect import KiteConnect
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class DataFetcher:
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.api_keys = config.get("api_keys", {})
-        self.data_providers = config.get("data_providers", {})
-        logging.info("DataFetcher initialized.")
+    def __init__(self, config_manager: ConfigManager):
+        self.config = config_manager.config # Access the raw config dictionary
+        self.config_manager = config_manager # Keep a reference to the manager itself
+        
+        # Initialize API clients based on configuration
+        self.zerodha_api_key = self.config_manager.get("apis.zerodha.api_key")
+        self.zerodha_api_secret = self.config_manager.get("apis.zerodha.api_secret")
+        self.zerodha_access_token = self.config_manager.get("apis.zerodha.access_token")
+        self.zerodha_base_url = self.config_manager.get("apis.zerodha.base_url")
 
-    def _make_api_call(self, url: str, headers: Optional[Dict] = None, params: Optional[Dict] = None) -> Optional[Dict]:
-        """Helper to make API calls with basic error handling."""
-        try:
-            response = requests.get(url, headers=headers, params=params, timeout=10)
-            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
-            return response.json()
-        except requests.exceptions.HTTPError as e:
-            logging.error(f"HTTP error occurred: {e} - Response: {e.response.text}")
-            return None
-        except requests.exceptions.ConnectionError as e:
-            logging.error(f"Connection error occurred: {e}")
-            return None
-        except requests.exceptions.Timeout as e:
-            logging.error(f"Timeout error occurred: {e}")
-            return None
-        except requests.exceptions.RequestException as e:
-            logging.error(f"An unexpected request error occurred: {e}")
-            return None
-        except ValueError as e: # For json.JSONDecodeError
-            logging.error(f"Failed to decode JSON response: {e} - Response text: {response.text}")
-            return None
+        # Initialize KiteConnect client (will be None if keys are missing or mock)
+        # You'll connect to this when you have valid tokens
+        self.kite = None
+        # You'll also need a way to manage the access token (e.g., store it after login)
+        
+        logger.info("DataFetcher initialized.")
 
-    def fetch_nifty_banknifty_status(self) -> Optional[Dict]:
-        """
-        Fetches the current status (value, change, etc.) for Nifty and BankNifty.
-        This is a placeholder. You'd integrate with actual API here (e.g., historical data provider for latest tick).
-        For demonstration, we'll return mocked data.
-        """
-        logging.info("Fetching Nifty/BankNifty status...")
-
-        # --- IMPORTANT: Replace this with actual API calls ---
-        # Example using a mock data (replace with actual API integration)
-        # You would typically get this from a real-time data feed or a reliable API
-        # For a production system, you'd integrate with services like:
-        # Zerodha KiteConnect, Fyers API, Upstox API, or external market data APIs (e.g., Alpha Vantage, Finnhub, Polygon.io)
-        # Ensure your API keys are configured and handled securely.
-
-        # Mocked data for demonstration
-        current_time = datetime.now()
-        mock_nifty_value = 22500.00 + (current_time.minute % 10 - 5) * 2.5
-        mock_banknifty_value = 48000.00 + (current_time.minute % 10 - 5) * 5.0
-
-        # Simulate a small random change
-        import random
-        nifty_change = round(random.uniform(-50, 50), 2)
-        banknifty_change = round(random.uniform(-100, 100), 2)
-
-        nifty_data = {
-            "current_value": mock_nifty_value,
-            "change": nifty_change,
-            "change_percent": (nifty_change / (mock_nifty_value - nifty_change)) * 100 if (mock_nifty_value - nifty_change) != 0 else 0,
-            "open": 22450.00,
-            "high": 22550.00,
-            "low": 22400.00,
-            "close": 22500.00 - nifty_change # Simple inverse to ensure change makes sense
-        }
-
-        banknifty_data = {
-            "current_value": mock_banknifty_value,
-            "change": banknifty_change,
-            "change_percent": (banknifty_change / (mock_banknifty_value - banknifty_change)) * 100 if (mock_banknifty_value - banknifty_change) != 0 else 0,
-            "open": 47900.00,
-            "high": 48100.00,
-            "low": 47850.00,
-            "close": 48000.00 - banknifty_change # Simple inverse to ensure change makes sense
-        }
-
+    async def fetch_market_data(self) -> Dict[str, Any]:
+        # TODO: Implement real-time market data fetching logic (e.g., from Zerodha, Twelve Data)
+        # This should fetch OHLCV, quotes, etc.
+        logger.warning("fetch_market_data: Not yet implemented, returning mock data.")
         return {
-            "nifty": nifty_data,
-            "banknifty": banknifty_data,
-            # "finnifty": {...} # Add Finnifty data if needed
-            "last_updated": current_time.isoformat()
+            "ohlcv_5min": [
+                {"timestamp": "2025-01-01T09:15:00Z", "open": 100, "high": 105, "low": 98, "close": 103, "volume": 1000},
+                {"timestamp": "2025-01-01T09:20:00Z", "open": 103, "high": 107, "low": 102, "close": 106, "volume": 1200}
+            ],
+            "quotes": {
+                "NIFTY50": {"last_price": 22000.50, "change": 0.25, "volume": 500000},
+                "BANKNIFTY": {"last_price": 48000.75, "change": -0.10, "volume": 300000}
+            }
         }
 
-    def fetch_historical_data(self, symbol: str, start_date: str, end_date: str, interval: str = '1d') -> Optional[pd.DataFrame]:
-        """
-        Fetches historical data for a given symbol.
-        (Placeholder for actual API integration, e.g., using Alpha Vantage, Yahoo Finance via pandas_datareader)
-        """
-        logging.info(f"Fetching historical data for {symbol} from {start_date} to {end_date} at {interval} interval.")
-        # Example: Alpha Vantage API integration
-        alpha_vantage_key = self.api_keys.get("ALPHA_VANTAGE")
-        if not alpha_vantage_key:
-            logging.warning("Alpha Vantage API key not found in config.")
-            return None
-
-        # This is a simplified example. Real-world integration involves more parameters.
-        # E.g., function=TIME_SERIES_DAILY_ADJUSTED, outputsize=full, datatype=json
-        # url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={alpha_vantage_key}"
-        # response_data = self._make_api_call(url)
-
-        # if response_data and "Time Series (Daily)" in response_data:
-        #     df = pd.DataFrame.from_dict(response_data["Time Series (Daily)"], orient='index')
-        #     df.index = pd.to_datetime(df.index)
-        #     df = df.astype(float)
-        #     return df
-        # else:
-        #     logging.warning(f"Could not fetch historical data for {symbol}.")
-        #     return None
-
-        # Mock Data for historical
-        dates = pd.date_range(start=start_date, end=end_date, freq=interval)
-        if dates.empty:
-            return pd.DataFrame() # Return empty if date range is invalid
-
-        data = {
-            'Open': [random.uniform(100, 105) for _ in dates],
-            'High': [random.uniform(105, 110) for _ in dates],
-            'Low': [random.uniform(95, 100) for _ in dates],
-            'Close': [random.uniform(98, 108) for _ in dates],
-            'Volume': [random.randint(100000, 500000) for _ in dates]
-        }
-        df = pd.DataFrame(data, index=dates)
-        return df
+    async def fetch_live_ohlcv(self, symbol: str, timeframe: str = "1min", limit: int = 100) -> List[Dict]:
+        # TODO: Implement actual live OHLCV fetching for specific symbol/timeframe
+        logger.warning(f"fetch_live_ohlcv for {symbol} {timeframe}: Not yet implemented, returning mock data.")
+        # Mock data (ensure it has enough history for indicator calculation)
+        mock_data = []
+        for i in range(200): # Provide enough data points for indicators (e.g., 200 for 50-period indicators)
+            close = 20000 + (i * 0.5) + (i % 5 - 2) * 10
+            open_p = close - 5
+            high_p = close + 10
+            low_p = close - 8
+            volume = 100000 + i * 100
+            mock_data.append({
+                "timestamp": (datetime.now() - timedelta(minutes=200-i)).isoformat(),
+                "open": open_p,
+                "high": high_p,
+                "low": low_p,
+                "close": close,
+                "volume": volume
+            })
+        return mock_data
 
 
-    # Add more fetching methods as needed, e.g.:
-    # - fetch_options_chain(symbol, expiry_date)
-    # - fetch_futures_data(symbol)
-    # - fetch_fno_list()
-    # - fetch_margin_details()
+    async def fetch_option_chain(self, symbol: str, expiry: Optional[str] = None) -> List[Dict]:
+        # TODO: Implement actual option chain fetching logic (e.g., from Zerodha, custom scraping)
+        logger.warning(f"fetch_option_chain for {symbol}: Not yet implemented, returning mock data.")
+        # Mock option chain data
+        return [
+            {
+                "strike": 22000,
+                "expiry": "2025-06-27",
+                "call": {"ltp": 150.0, "volume": 150000, "oi": 700000, "iv": 25.0, "delta": 0.55},
+                "put": {"ltp": 80.0, "volume": 120000, "oi": 600000, "iv": 22.0, "delta": -0.45}
+            },
+            {
+                "strike": 22100,
+                "expiry": "2025-06-27",
+                "call": {"ltp": 100.0, "volume": 100000, "oi": 500000, "iv": 23.0, "delta": 0.40},
+                "put": {"ltp": 100.0, "volume": 110000, "oi": 550000, "iv": 24.0, "delta": -0.60}
+            }
+        ]
+
+    async def fetch_historical_ohlcv(self, symbol: str, start_date: str, end_date: str, timeframe: str = "1day") -> List[Dict]:
+        # TODO: Implement actual historical OHLCV data fetching
+        logger.warning(f"fetch_historical_ohlcv for {symbol} {start_date} to {end_date}: Not yet implemented, returning mock data.")
+        # Generate some mock historical data for demonstration
+        mock_data = []
+        current_date = datetime.strptime(start_date, "%Y-%m-%d")
+        end_date_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        
+        while current_date <= end_date_dt:
+            close = 1000 + (current_date.day * 5) + (current_date.month * 10)
+            mock_data.append({
+                "timestamp": current_date.isoformat(),
+                "open": close - 5,
+                "high": close + 10,
+                "low": close - 8,
+                "close": close,
+                "volume": 100000
+            })
+            current_date += timedelta(days=1)
+        return mock_data
+
+    # --- Placeholder Connection Test Methods ---
+    async def test_zerodha_connection(self) -> bool:
+        """Tests connection to Zerodha API."""
+        # TODO: Implement actual Zerodha API connection test.
+        # This could involve trying to fetch a small piece of data
+        # or checking the KiteConnect client's status if connected.
+        # For now, it assumes success if access token is present.
+        if self.zerodha_api_key and self.zerodha_api_secret and self.zerodha_access_token:
+            # Placeholder: In a real scenario, you'd make a lightweight API call
+            # try:
+            #     kite = KiteConnect(api_key=self.zerodha_api_key)
+            #     kite.set_access_token(self.zerodha_access_token)
+            #     user_profile = await asyncio.to_thread(kite.profile) # Example call
+            #     logger.info(f"Zerodha connection test: Successfully fetched user profile for {user_profile.get('user_name')}")
+            #     return True
+            # except Exception as e:
+            #     logger.error(f"Zerodha connection test failed: {e}")
+            #     return False
+            return True # Placeholder for now
+        logger.warning("Zerodha API credentials or access token not fully configured for testing.")
+        return False
+
+    async def test_twelve_data_connection(self) -> bool:
+        """Tests connection to Twelve Data API."""
+        # TODO: Implement actual Twelve Data API connection test.
+        # This could involve a small, cheap API call (e.g., getting a quote for a common symbol)
+        if self.config_manager.get("apis.twelve_data.api_key"):
+            # Placeholder: In a real scenario, you'd make a small API call
+            # try:
+            #     # Example using httpx or requests (after importing)
+            #     import httpx
+            #     url = f"{self.config_manager.get('apis.twelve_data.base_url')}/quote?symbol=AAPL&apikey={self.config_manager.get('apis.twelve_data.api_key')}"
+            #     async with httpx.AsyncClient() as client:
+            #         response = await client.get(url, timeout=5)
+            #         response.raise_for_status() # Raise an exception for bad status codes
+            #         data = response.json()
+            #         if data and "status" in data and data["status"] == "ok":
+            #             logger.info("Twelve Data connection test: SUCCESS")
+            #             return True
+            # except Exception as e:
+            #     logger.error(f"Twelve Data connection test failed: {e}")
+            #     return False
+            return True # Placeholder for now
+        logger.warning("Twelve Data API key not configured for testing.")
+        return False

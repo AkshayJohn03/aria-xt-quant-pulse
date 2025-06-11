@@ -1,23 +1,23 @@
 {
   "apis": {
     "zerodha": {
-      "api_key": "",
-      "api_secret": "",
-      "access_token": "",
+      "api_key": null,
+      "api_secret": null,
+      "access_token": null,
       "base_url": "https://api.kite.trade"
     },
     "twelve_data": {
-      "api_key": "",
+      "api_key": null,
       "base_url": "https://api.twelvedata.com"
     },
     "gemini": {
-      "api_key": "",
+      "api_key": null,
       "model": "gemini-2.0-flash-exp",
       "base_url": "https://generativelanguage.googleapis.com/v1beta"
     },
     "telegram": {
-      "bot_token": "",
-      "chat_id": ""
+      "bot_token": null,
+      "chat_id": null
     }
   },
   "trading": {

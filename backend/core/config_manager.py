@@ -1,9 +1,9 @@
-
 import json
 import os
 from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
+from dotenv import load_dotenv # ADD THIS IMPORT
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +11,10 @@ class ConfigManager:
     """Manages application configuration and settings"""
     
     def __init__(self, config_file: str = "config.json"):
+        load_dotenv() # ADD THIS LINE: Loads environment variables from .env
         self.config_file = Path(config_file)
         self.config = self.load_config()
+        self._merge_env_variables() # ADD THIS LINE: Merge env vars after loading JSON
     
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file or create default"""
@@ -23,11 +25,12 @@ class ConfigManager:
                 logger.info(f"Configuration loaded from {self.config_file}")
                 return config
             except Exception as e:
-                logger.error(f"Error loading config: {e}")
-                return self.get_default_config()
+                logger.error(f"Error loading config from {self.config_file}: {e}. Falling back to default.")
+                return self.get_default_config() # Still fall back if JSON is corrupted
         else:
             config = self.get_default_config()
             self.save_config(config)
+            logger.info(f"No {self.config_file} found. Created with default configuration.")
             return config
     
     def save_config(self, config: Optional[Dict[str, Any]] = None) -> bool:
@@ -43,27 +46,30 @@ class ConfigManager:
             return False
     
     def get_default_config(self) -> Dict[str, Any]:
-        """Return default configuration"""
+        """Return a base default configuration without directly reading env vars.
+           Env vars will be merged by _merge_env_variables."""
+        # Changed this to return a default structure. _merge_env_variables will
+        # fill in the env specific keys.
         return {
             "apis": {
                 "zerodha": {
-                    "api_key": os.getenv("ZERODHA_API_KEY", ""),
-                    "api_secret": os.getenv("ZERODHA_API_SECRET", ""),
-                    "access_token": os.getenv("ZERODHA_ACCESS_TOKEN", ""),
+                    "api_key": None, # Set to None, will be filled by env var
+                    "api_secret": None, # Set to None, will be filled by env var
+                    "access_token": None, # Set to None, will be filled by env var
                     "base_url": "https://api.kite.trade"
                 },
                 "twelve_data": {
-                    "api_key": os.getenv("TWELVE_DATA_API_KEY", ""),
+                    "api_key": None, # Set to None, will be filled by env var
                     "base_url": "https://api.twelvedata.com"
                 },
                 "gemini": {
-                    "api_key": os.getenv("GEMINI_API_KEY", ""),
+                    "api_key": None, # Set to None, will be filled by env var
                     "model": "gemini-2.0-flash-exp",
                     "base_url": "https://generativelanguage.googleapis.com/v1beta"
                 },
                 "telegram": {
-                    "bot_token": os.getenv("TELEGRAM_BOT_TOKEN", ""),
-                    "chat_id": os.getenv("TELEGRAM_CHAT_ID", "")
+                    "bot_token": None, # Set to None, will be filled by env var
+                    "chat_id": None # Set to None, will be filled by env var
                 }
             },
             "trading": {
@@ -122,6 +128,25 @@ class ConfigManager:
             }
         }
     
+    def _merge_env_variables(self):
+        """Helper to explicitly merge environment variables into the loaded config."""
+        # Define mappings from config path to environment variable name
+        env_map = {
+            "apis.zerodha.api_key": "ZERODHA_API_KEY",
+            "apis.zerodha.api_secret": "ZERODHA_API_SECRET",
+            "apis.zerodha.access_token": "ZERODHA_ACCESS_TOKEN",
+            "apis.twelve_data.api_key": "TWELVE_DATA_API_KEY",
+            "apis.gemini.api_key": "GEMINI_API_KEY",
+            "apis.telegram.bot_token": "TELEGRAM_BOT_TOKEN",
+            "apis.telegram.chat_id": "TELEGRAM_CHAT_ID",
+        }
+
+        for config_path, env_var_name in env_map.items():
+            env_value = os.getenv(env_var_name)
+            if env_value is not None: # Check if environment variable is set (even if empty string)
+                # Use the existing set method for dot notation update
+                self.set(config_path, env_value)
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value by key (supports dot notation)"""
         keys = key.split('.')
@@ -146,10 +171,12 @@ class ConfigManager:
             config = config[k]
         
         config[keys[-1]] = value
-        return self.save_config()
+        # Don't save immediately here unless you want every 'set' to write to file
+        # The update_config method handles saving.
+        return True # Indicate success
     
     def update_config(self, updates: Dict[str, Any]) -> bool:
-        """Update configuration with new values"""
+        """Update configuration with new values and save to file"""
         def update_nested_dict(d, u):
             for k, v in u.items():
                 if isinstance(v, dict):
@@ -159,7 +186,7 @@ class ConfigManager:
             return d
         
         update_nested_dict(self.config, updates)
-        return self.save_config()
+        return self.save_config() # Save after all updates
     
     def validate_config(self) -> bool:
         """Validate current configuration"""
@@ -171,7 +198,7 @@ class ConfigManager:
         
         for field in required_fields:
             value = self.get(field)
-            if not value:
+            if not value: # This check is good, as it catches both None and ""
                 logger.error(f"Missing required configuration: {field}")
                 return False
         
