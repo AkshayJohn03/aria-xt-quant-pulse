@@ -1,7 +1,7 @@
+
 import { useState, useEffect } from 'react';
 import { ariaAPI } from '../lib/api/endpoints';
 
-// Define the expected MarketData interface
 interface MarketData {
   nifty: {
     value: number;
@@ -16,29 +16,38 @@ interface MarketData {
   marketStatus: string;
   lastUpdate: string;
   aiSentiment: {
-    direction: string; // e.g., "BULLISH", "BEARISH", "NEUTRAL"
-    confidence: number; // Percentage
+    direction: string;
+    confidence: number;
   };
 }
 
 export const useMarketData = () => {
-  const [marketData, setMarketData] = useState<MarketData | null>(null); // Specify type
+  const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null); // Specify type
+  const [error, setError] = useState<string | null>(null);
 
   const fetchMarketData = async () => {
     try {
       setLoading(true);
-      // This call will now expect the backend to return data matching MarketData interface
-      const response = await ariaAPI.getMarketData(); 
-      if (response.success) {
-        setMarketData(response.data as MarketData); // Cast to MarketData
+      setError(null);
+      
+      console.log('Fetching market data from backend...');
+      const response = await ariaAPI.getMarketData();
+      
+      console.log('Market data response:', response);
+      
+      if (response.success && response.data) {
+        setMarketData(response.data as MarketData);
         setError(null);
       } else {
-        setError(response.error || "An unknown error occurred."); // Handle potential undefined error
+        const errorMsg = response.error || "Failed to fetch market data";
+        setError(errorMsg);
+        console.error('Market data fetch failed:', errorMsg);
       }
-    } catch (err: any) { // Catch any error type
-      setError(err.message || "Network error or unexpected response.");
+    } catch (err: any) {
+      const errorMsg = err.message || "Network error - is backend running?";
+      setError(errorMsg);
+      console.error('Market data fetch error:', err);
     } finally {
       setLoading(false);
     }
@@ -46,9 +55,9 @@ export const useMarketData = () => {
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 3000); // Poll every 3 seconds
+    const interval = setInterval(fetchMarketData, 5000); // Poll every 5 seconds
     return () => clearInterval(interval);
-  }, []); // Empty dependency array means this runs once on mount
+  }, []);
 
   return { marketData, loading, error, refetch: fetchMarketData };
 };

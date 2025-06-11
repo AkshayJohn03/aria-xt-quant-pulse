@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { ArrowUp, ArrowDown, TrendingUp, Activity } from 'lucide-react';
+import { ArrowUp, ArrowDown, TrendingUp, Activity, AlertCircle } from 'lucide-react';
 
 interface MarketData {
   nifty: {
@@ -16,7 +16,6 @@ interface MarketData {
   };
   marketStatus: string;
   lastUpdate: string;
-  // Assuming AI Sentiment also comes from backend eventually
   aiSentiment: {
     direction: string; // e.g., "BULLISH", "BEARISH", "NEUTRAL"
     confidence: number; // Percentage
@@ -25,9 +24,63 @@ interface MarketData {
 
 interface MarketOverviewProps {
   marketData?: MarketData; // Make marketData optional to handle initial undefined/null state
+  loading?: boolean;
+  error?: string;
 }
 
-const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData }) => {
+const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData, loading = false, error }) => {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <Card key={i} className="bg-slate-800/50 border-slate-700">
+            <CardHeader className="animate-pulse">
+              <div className="h-4 bg-slate-600 rounded w-1/2"></div>
+            </CardHeader>
+            <CardContent className="animate-pulse">
+              <div className="h-8 bg-slate-600 rounded w-3/4 mb-2"></div>
+              <div className="h-3 bg-slate-600 rounded w-1/2"></div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="bg-red-900/20 border-red-700 col-span-full">
+          <CardHeader className="flex flex-row items-center space-y-0 pb-2">
+            <AlertCircle className="h-4 w-4 text-red-400 mr-2" />
+            <CardTitle className="text-red-400">Market Data Error</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-red-300">{error}</p>
+            <p className="text-slate-400 text-sm mt-2">
+              Please ensure the backend server is running on http://localhost:8000
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!marketData) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="bg-slate-800/50 border-slate-700 col-span-full text-center py-8">
+          <CardHeader>
+            <CardTitle className="text-white text-xl">No Market Data Available</CardTitle>
+          </CardHeader>
+          <CardContent className="text-slate-400">
+            Waiting for market data from backend...
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Provide default/loading values if marketData is not yet available
   const currentNiftyValue = marketData?.nifty?.value ?? 0;
   const currentNiftyChange = marketData?.nifty?.change ?? 0;
@@ -57,20 +110,6 @@ const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData }) => {
     currentAiSentimentDirection === "BEARISH" ? "bg-red-500/20 text-red-400 border-red-400" :
     "bg-gray-500/20 text-gray-400 border-gray-400";
 
-
-  // Basic check to see if marketData is undefined or null, and render a loading state
-  if (!marketData) {
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-slate-800/50 border-slate-700 col-span-full text-center py-8">
-          <CardTitle className="text-white text-xl">Loading Market Data...</CardTitle>
-          <CardContent className="text-slate-400 mt-2">
-            Please ensure the backend is running and providing data.
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -37,19 +37,17 @@ export interface OptionChainData {
 
 export class DataFetcher {
   private config: ConfigManager;
+  private baseURL: string;
 
   constructor() {
     this.config = new ConfigManager();
+    this.baseURL = 'http://localhost:8000/api/v1';
   }
 
   async fetchLiveOHLCV(symbol: string = 'NIFTY50'): Promise<OHLCVData[]> {
     try {
-      const { apiKey } = this.config.getConfig().apis.zerodha;
-      
-      // Simulate Zerodha API call - replace with actual implementation
-      const response = await fetch(`/api/zerodha/ohlcv?symbol=${symbol}`, {
+      const response = await fetch(`${this.baseURL}/live-ohlcv?symbol=${symbol}`, {
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         }
       });
@@ -58,29 +56,36 @@ export class DataFetcher {
         throw new Error(`Failed to fetch live OHLCV: ${response.statusText}`);
       }
 
-      return await response.json();
+      const result = await response.json();
+      if (result.success) {
+        return result.data;
+      } else {
+        throw new Error(result.error || 'Failed to fetch OHLCV data');
+      }
     } catch (error) {
       console.error('Error fetching live OHLCV:', error);
-      // Fallback to simulated data for demo
       return this.generateSimulatedOHLCV();
     }
   }
 
   async fetchHistoricalOHLCV(symbol: string, startDate: string, endDate: string): Promise<OHLCVData[]> {
     try {
-      const { apiKey } = this.config.getConfig().apis.twelveData;
-      
-      // Twelve Data API call for historical data
-      const response = await fetch(
-        `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1min&start_date=${startDate}&end_date=${endDate}&apikey=${apiKey}`
-      );
+      const response = await fetch(`${this.baseURL}/historical-ohlcv?symbol=${symbol}&start_date=${startDate}&end_date=${endDate}`, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to fetch historical OHLCV: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      return this.parseHistoricalData(data);
+      const result = await response.json();
+      if (result.success) {
+        return result.data;
+      } else {
+        throw new Error(result.error || 'Failed to fetch historical data');
+      }
     } catch (error) {
       console.error('Error fetching historical OHLCV:', error);
       return this.generateSimulatedOHLCV();
@@ -89,14 +94,22 @@ export class DataFetcher {
 
   async fetchOptionChain(): Promise<OptionChainData[]> {
     try {
-      // NSE Option Chain scraping - in production, implement proper scraping
-      const response = await fetch('/api/nse/option-chain');
-      
+      const response = await fetch(`${this.baseURL}/option-chain`, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
       if (!response.ok) {
         throw new Error(`Failed to fetch option chain: ${response.statusText}`);
       }
 
-      return await response.json();
+      const result = await response.json();
+      if (result.success) {
+        return result.data;
+      } else {
+        throw new Error(result.error || 'Failed to fetch option chain');
+      }
     } catch (error) {
       console.error('Error fetching option chain:', error);
       return this.generateSimulatedOptionChain();
@@ -105,11 +118,8 @@ export class DataFetcher {
 
   async fetchMarketData(): Promise<any> {
     try {
-      const { apiKey } = this.config.getConfig().apis.zerodha;
-      
-      const response = await fetch('/api/zerodha/market-data', {
+      const response = await fetch(`${this.baseURL}/market-data`, {
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         }
       });
@@ -118,14 +128,31 @@ export class DataFetcher {
         throw new Error(`Failed to fetch market data: ${response.statusText}`);
       }
 
-      return await response.json();
+      const result = await response.json();
+      if (result.success) {
+        return result.data;
+      } else {
+        throw new Error(result.error || 'Failed to fetch market data');
+      }
     } catch (error) {
       console.error('Error fetching market data:', error);
       return {
-        nifty: 19850.25 + (Math.random() - 0.5) * 100,
-        sensex: 66589.93 + (Math.random() - 0.5) * 500,
+        nifty: {
+          value: 19850.25 + (Math.random() - 0.5) * 100,
+          change: (Math.random() - 0.5) * 50,
+          percentChange: (Math.random() - 0.5) * 2
+        },
+        sensex: {
+          value: 66589.93 + (Math.random() - 0.5) * 500,
+          change: (Math.random() - 0.5) * 200,
+          percentChange: (Math.random() - 0.5) * 1.5
+        },
         marketStatus: 'OPEN',
-        lastUpdate: new Date().toISOString()
+        lastUpdate: new Date().toISOString(),
+        aiSentiment: {
+          direction: 'NEUTRAL',
+          confidence: 50
+        }
       };
     }
   }

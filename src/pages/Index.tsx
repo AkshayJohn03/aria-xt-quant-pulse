@@ -15,7 +15,7 @@ import { useMarketData } from '@/hooks/useAriaAPI';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { marketData } = useMarketData();
+  const { marketData, loading, error } = useMarketData();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-800 text-white">
@@ -43,7 +43,7 @@ const Index = () => {
               </TabsList>
 
               <TabsContent value="dashboard" className="space-y-6">
-                <MarketOverview marketData={marketData} />
+                <MarketOverview marketData={marketData} loading={loading} error={error} />
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <PredictiveCharts />
                   <RiskManagement />
