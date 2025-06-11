@@ -4,13 +4,23 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowUp, ArrowDown, TrendingUp, Activity } from 'lucide-react';
 
 interface MarketData {
-  nifty: number;
-  sensex: number;
+  nifty: {
+    value: number;
+    change: number;
+    percentChange: number;
+  };
+  sensex: {
+    value: number;
+    change: number;
+    percentChange: number;
+  };
   marketStatus: string;
   lastUpdate: string;
-  // If 'qty' was ever part of this, consider adding it here,
-  // but it's not present in your provided interface.
-  // Assuming the error was about nifty/sensex being null initially.
+  // Assuming AI Sentiment also comes from backend eventually
+  aiSentiment: {
+    direction: string; // e.g., "BULLISH", "BEARISH", "NEUTRAL"
+    confidence: number; // Percentage
+  };
 }
 
 interface MarketOverviewProps {
@@ -19,14 +29,34 @@ interface MarketOverviewProps {
 
 const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData }) => {
   // Provide default/loading values if marketData is not yet available
-  const currentNifty = marketData?.nifty ?? 0;
-  const currentSensex = marketData?.sensex ?? 0;
+  const currentNiftyValue = marketData?.nifty?.value ?? 0;
+  const currentNiftyChange = marketData?.nifty?.change ?? 0;
+  const currentNiftyPercentChange = marketData?.nifty?.percentChange ?? 0;
+
+  const currentSensexValue = marketData?.sensex?.value ?? 0;
+  const currentSensexChange = marketData?.sensex?.change ?? 0;
+  const currentSensexPercentChange = marketData?.sensex?.percentChange ?? 0;
+
   const currentMarketStatus = marketData?.marketStatus ?? "Loading...";
   const currentLastUpdate = marketData?.lastUpdate ?? "N/A";
 
-  // These are hardcoded in your component. If they should come from marketData, update MarketData interface
-  const niftyChange = 145.30;
-  const sensexChange = 287.65;
+  const currentAiSentimentDirection = marketData?.aiSentiment?.direction ?? "NEUTRAL";
+  const currentAiSentimentConfidence = marketData?.aiSentiment?.confidence ?? 0;
+
+  // Determine change indicator for Nifty
+  const niftyChangeIndicator = currentNiftyChange >= 0 ? ArrowUp : ArrowDown;
+  const niftyChangeColor = currentNiftyChange >= 0 ? "text-green-400" : "text-red-400";
+
+  // Determine change indicator for Sensex
+  const sensexChangeIndicator = currentSensexChange >= 0 ? ArrowUp : ArrowDown;
+  const sensexChangeColor = currentSensexChange >= 0 ? "text-green-400" : "text-red-400";
+
+  // Determine sentiment badge color
+  const sentimentBadgeColor = 
+    currentAiSentimentDirection === "BULLISH" ? "bg-green-500/20 text-green-400 border-green-400" :
+    currentAiSentimentDirection === "BEARISH" ? "bg-red-500/20 text-red-400 border-red-400" :
+    "bg-gray-500/20 text-gray-400 border-gray-400";
+
 
   // Basic check to see if marketData is undefined or null, and render a loading state
   if (!marketData) {
@@ -48,15 +78,18 @@ const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData }) => {
       <Card className="bg-slate-800/50 border-slate-700">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-slate-300">NIFTY 50</CardTitle>
-          <TrendingUp className="h-4 w-4 text-green-400" />
+          <TrendingUp className="h-4 w-4 text-green-400" /> {/* Icon remains static for now */}
         </CardHeader>
         <CardContent>
-          {/* Use currentNifty for rendering */}
-          <div className="text-2xl font-bold text-white">{currentNifty.toFixed(2)}</div>
+          <div className="text-2xl font-bold text-white">{currentNiftyValue.toFixed(2)}</div>
           <div className="flex items-center space-x-2 text-xs">
-            <ArrowUp className="h-3 w-3 text-green-400" />
-            <span className="text-green-400">+{niftyChange}</span>
-            <span className="text-slate-400">(+0.73%)</span>
+            {React.createElement(niftyChangeIndicator, { className: `h-3 w-3 ${niftyChangeColor}` })}
+            <span className={niftyChangeColor}>
+              {currentNiftyChange >= 0 ? '+' : ''}{currentNiftyChange.toFixed(2)}
+            </span>
+            <span className="text-slate-400">
+              ({currentNiftyPercentChange >= 0 ? '+' : ''}{currentNiftyPercentChange.toFixed(2)}%)
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -65,15 +98,18 @@ const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData }) => {
       <Card className="bg-slate-800/50 border-slate-700">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-slate-300">SENSEX</CardTitle>
-          <Activity className="h-4 w-4 text-blue-400" />
+          <Activity className="h-4 w-4 text-blue-400" /> {/* Icon remains static for now */}
         </CardHeader>
         <CardContent>
-          {/* Use currentSensex for rendering */}
-          <div className="text-2xl font-bold text-white">{currentSensex.toFixed(2)}</div>
+          <div className="text-2xl font-bold text-white">{currentSensexValue.toFixed(2)}</div>
           <div className="flex items-center space-x-2 text-xs">
-            <ArrowUp className="h-3 w-3 text-green-400" />
-            <span className="text-green-400">+{sensexChange}</span>
-            <span className="text-slate-400">(+0.43%)</span>
+            {React.createElement(sensexChangeIndicator, { className: `h-3 w-3 ${sensexChangeColor}` })}
+            <span className={sensexChangeColor}>
+              {currentSensexChange >= 0 ? '+' : ''}{currentSensexChange.toFixed(2)}
+            </span>
+            <span className="text-slate-400">
+              ({currentSensexPercentChange >= 0 ? '+' : ''}{currentSensexPercentChange.toFixed(2)}%)
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -82,25 +118,26 @@ const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData }) => {
       <Card className="bg-slate-800/50 border-slate-700">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-slate-300">Market Status</CardTitle>
-          <div className="h-2 w-2 bg-green-400 rounded-full"></div>
+          <div className="h-2 w-2 bg-green-400 rounded-full"></div> {/* Static status light for now */}
         </CardHeader>
         <CardContent>
-          {/* Use currentMarketStatus and currentLastUpdate */}
           <div className="text-2xl font-bold text-white">{currentMarketStatus}</div>
           <p className="text-xs text-slate-400">Last update: {currentLastUpdate}</p>
         </CardContent>
       </Card>
 
-      {/* AI Sentiment Card (static for now) */}
+      {/* AI Sentiment Card */}
       <Card className="bg-slate-800/50 border-slate-700">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-slate-300">AI Sentiment</CardTitle>
-          <Badge variant="outline" className="bg-green-500/20 text-green-400 border-green-400">
-            BULLISH
+          <Badge variant="outline" className={sentimentBadgeColor}>
+            {currentAiSentimentDirection.toUpperCase()}
           </Badge>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-green-400">82%</div>
+          <div className={`text-2xl font-bold ${sentimentBadgeColor.includes('green') ? 'text-green-400' : sentimentBadgeColor.includes('red') ? 'text-red-400' : 'text-gray-400'}`}>
+            {currentAiSentimentConfidence.toFixed(0)}%
+          </div>
           <p className="text-xs text-slate-400">Confidence Score</p>
         </CardContent>
       </Card>

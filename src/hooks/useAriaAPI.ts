@@ -1,23 +1,44 @@
 import { useState, useEffect } from 'react';
 import { ariaAPI } from '../lib/api/endpoints';
 
+// Define the expected MarketData interface
+interface MarketData {
+  nifty: {
+    value: number;
+    change: number;
+    percentChange: number;
+  };
+  sensex: {
+    value: number;
+    change: number;
+    percentChange: number;
+  };
+  marketStatus: string;
+  lastUpdate: string;
+  aiSentiment: {
+    direction: string; // e.g., "BULLISH", "BEARISH", "NEUTRAL"
+    confidence: number; // Percentage
+  };
+}
+
 export const useMarketData = () => {
-  const [marketData, setMarketData] = useState(null);
+  const [marketData, setMarketData] = useState<MarketData | null>(null); // Specify type
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null); // Specify type
 
   const fetchMarketData = async () => {
     try {
       setLoading(true);
-      const response = await ariaAPI.getMarketData();
+      // This call will now expect the backend to return data matching MarketData interface
+      const response = await ariaAPI.getMarketData(); 
       if (response.success) {
-        setMarketData(response.data);
+        setMarketData(response.data as MarketData); // Cast to MarketData
         setError(null);
       } else {
-        setError(response.error);
+        setError(response.error || "An unknown error occurred."); // Handle potential undefined error
       }
-    } catch (err) {
-      setError(err.message);
+    } catch (err: any) { // Catch any error type
+      setError(err.message || "Network error or unexpected response.");
     } finally {
       setLoading(false);
     }
@@ -25,13 +46,14 @@ export const useMarketData = () => {
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 3000);
+    const interval = setInterval(fetchMarketData, 3000); // Poll every 3 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, []); // Empty dependency array means this runs once on mount
 
   return { marketData, loading, error, refetch: fetchMarketData };
 };
 
+// Existing hooks remain the same for now, but will be updated later for real data
 export const usePredictions = () => {
   const [prediction, setPrediction] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -146,8 +168,8 @@ export const useConnectionStatus = () => {
         // Handle the case where response might have an error property
         setError('Failed to fetch connection status');
       }
-    } catch (err) {
-      setError(err.message);
+    } catch (err: any) {
+      setError(err.message || 'Network error or unexpected response.');
     } finally {
       setLoading(false);
     }

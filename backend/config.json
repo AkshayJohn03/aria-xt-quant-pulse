@@ -71,7 +71,9 @@
       "15min"
     ],
     "max_history_days": 30,
-    "cache_duration_minutes": 5
+    "cache_duration_minutes": 5,
+    "nifty_instrument_token": "256265",  
+    "sensex_instrument_token": "265" 
   },
   "risk_management": {
     "max_drawdown_percent": 15.0,

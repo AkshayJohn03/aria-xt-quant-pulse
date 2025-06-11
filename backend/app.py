@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -25,7 +24,7 @@ load_dotenv()
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG, # CHANGED FROM INFO TO DEBUG
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('aria_xt.log'),
@@ -212,12 +211,12 @@ async def trading_loop():
             system_status["total_pnl"] = risk_manager.calculate_total_pnl()
             
             # Wait before next iteration
-            await asyncio.sleep(10)  # 10-second intervals
+            await asyncio.sleep(10) # 10-second intervals
             
         except Exception as e:
             logger.error(f"Error in trading loop: {str(e)}")
             system_status["system_health"] = f"ERROR: {str(e)}"
-            await asyncio.sleep(60)  # Wait longer on error
+            await asyncio.sleep(60) # Wait longer on error
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -225,5 +224,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        log_level="info"
+        log_level="info" # This log_level is for Uvicorn's internal logging, not overridden by basicConfig
     )
