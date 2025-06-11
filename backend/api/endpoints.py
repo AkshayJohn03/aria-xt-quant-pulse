@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
@@ -9,314 +8,300 @@ from core.config_manager import ConfigManager
 from core.data_fetcher import DataFetcher
 from core.model_interface import ModelInterface
 from core.risk_manager import RiskManager
+# Import global instances from app.py to ensure singletons are used
+from app import config_manager, data_fetcher, model_interface, risk_manager, signal_generator, trade_executor, telegram_notifier, system_status
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Dependency injection
-def get_config_manager():
-    return ConfigManager()
+# Dependency injection - now using the global instances initialized in app.py
+def get_config_manager_dep():
+    return config_manager
 
-def get_data_fetcher(config: ConfigManager = Depends(get_config_manager)):
-    return DataFetcher(config)
+def get_data_fetcher_dep():
+    return data_fetcher
 
-def get_model_interface(config: ConfigManager = Depends(get_config_manager)):
-    return ModelInterface(config)
+def get_model_interface_dep():
+    return model_interface
 
-def get_risk_manager(config: ConfigManager = Depends(get_config_manager)):
-    return RiskManager(config)
+def get_risk_manager_dep():
+    return risk_manager
 
-# Configuration endpoints
+# --- Configuration endpoints ---
 @router.get("/config")
-async def get_config(config: ConfigManager = Depends(get_config_manager)):
+async def get_config(config: ConfigManager = Depends(get_config_manager_dep)):
     """Get current configuration"""
-    return config.config
+    try:
+        return JSONResponse(content={"success": True, "data": config.config, "error": None})
+    except Exception as e:
+        logger.error(f"Error fetching configuration: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.post("/config")
 async def update_config(
     updates: Dict[str, Any],
-    config: ConfigManager = Depends(get_config_manager)
+    config: ConfigManager = Depends(get_config_manager_dep)
 ):
     """Update configuration"""
-    success = config.update_config(updates)
-    if success:
-        return {"message": "Configuration updated successfully"}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to update configuration")
+    try:
+        success = config.update_config(updates)
+        if success:
+            return JSONResponse(content={"success": True, "data": {"message": "Configuration updated successfully"}, "error": None})
+        else:
+            return JSONResponse(content={"success": False, "data": None, "error": "Failed to update configuration"}, status_code=500)
+    except Exception as e:
+        logger.error(f"Error updating configuration: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+
 
 @router.get("/config/validate")
-async def validate_config(config: ConfigManager = Depends(get_config_manager)):
+async def validate_config(config: ConfigManager = Depends(get_config_manager_dep)):
     """Validate current configuration"""
-    is_valid = config.validate_config()
-    return {"valid": is_valid}
+    try:
+        is_valid = config.validate_config()
+        return JSONResponse(content={"success": True, "data": {"valid": is_valid}, "error": None})
+    except Exception as e:
+        logger.error(f"Error validating configuration: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
-# Market data endpoints
+# --- Market data endpoints ---
 @router.get("/market-data")
-async def get_market_data(data_fetcher: DataFetcher = Depends(get_data_fetcher)):
+async def get_market_data(data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)):
     """Get current market data"""
     try:
-        market_data = await data_fetcher.fetch_market_data()
-        return market_data
+        market_data = await data_fetcher_inst.fetch_market_data()
+        return JSONResponse(content={"success": True, "data": market_data, "error": None})
     except Exception as e:
         logger.error(f"Error fetching market data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.get("/ohlcv/{symbol}")
 async def get_ohlcv_data(
     symbol: str,
     timeframe: str = "1min",
     limit: int = 100,
-    data_fetcher: DataFetcher = Depends(get_data_fetcher)
+    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)
 ):
     """Get OHLCV data for a symbol"""
     try:
-        ohlcv_data = await data_fetcher.fetch_live_ohlcv(symbol, timeframe, limit)
-        return {"symbol": symbol, "timeframe": timeframe, "data": ohlcv_data}
+        ohlcv_data = await data_fetcher_inst.fetch_live_ohlcv(symbol, timeframe, limit)
+        return JSONResponse(content={"success": True, "data": {"symbol": symbol, "timeframe": timeframe, "data": ohlcv_data}, "error": None})
     except Exception as e:
-        logger.error(f"Error fetching OHLCV data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching OHLCV data for {symbol}: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.get("/option-chain")
 async def get_option_chain(
     symbol: str = "NIFTY",
     expiry: Optional[str] = None,
-    data_fetcher: DataFetcher = Depends(get_data_fetcher)
+    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)
 ):
     """Get option chain data"""
     try:
-        option_chain = await data_fetcher.fetch_option_chain(symbol, expiry)
-        return {"symbol": symbol, "expiry": expiry, "data": option_chain}
+        option_chain = await data_fetcher_inst.fetch_option_chain(symbol, expiry)
+        return JSONResponse(content={"success": True, "data": {"symbol": symbol, "expiry": expiry, "data": option_chain}, "error": None})
     except Exception as e:
-        logger.error(f"Error fetching option chain: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching option chain for {symbol}: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
-# Model and prediction endpoints
+# --- Model and prediction endpoints ---
 @router.post("/prediction")
 async def generate_prediction(
     symbol: str,
     timeframe: str = "1min",
-    model_interface: ModelInterface = Depends(get_model_interface),
-    data_fetcher: DataFetcher = Depends(get_data_fetcher)
+    model_interface_inst: ModelInterface = Depends(get_model_interface_dep),
+    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)
 ):
     """Generate price prediction"""
     try:
-        # Fetch recent data
-        ohlcv_data = await data_fetcher.fetch_live_ohlcv(symbol, timeframe, 100)
+        ohlcv_data = await data_fetcher_inst.fetch_live_ohlcv(symbol, timeframe, 100)
+        prediction = await model_interface_inst.generate_prediction(ohlcv_data)
         
-        # Generate prediction
-        prediction = await model_interface.generate_prediction(ohlcv_data)
-        
-        return {
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "prediction": prediction,
-            "timestamp": datetime.now().isoformat()
-        }
+        return JSONResponse(content={
+            "success": True,
+            "data": {
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "prediction": prediction,
+                "timestamp": datetime.now().isoformat()
+            },
+            "error": None
+        })
     except Exception as e:
-        logger.error(f"Error generating prediction: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error generating prediction for {symbol}: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.post("/trading-signal")
 async def generate_trading_signal(
     symbol: str = "NIFTY",
-    model_interface: ModelInterface = Depends(get_model_interface),
-    data_fetcher: DataFetcher = Depends(get_data_fetcher),
-    risk_manager: RiskManager = Depends(get_risk_manager)
+    model_interface_inst: ModelInterface = Depends(get_model_interface_dep),
+    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
+    risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)
 ):
     """Generate trading signal"""
     try:
-        # Fetch market data
-        ohlcv_data = await data_fetcher.fetch_live_ohlcv(symbol)
-        option_chain = await data_fetcher.fetch_option_chain(symbol)
+        ohlcv_data = await data_fetcher_inst.fetch_live_ohlcv(symbol)
+        option_chain = await data_fetcher_inst.fetch_option_chain(symbol)
         
-        # Generate signal
-        signal = await model_interface.generate_trading_signal(ohlcv_data, option_chain)
+        signal = await model_interface_inst.generate_trading_signal(ohlcv_data, option_chain)
         
         if signal:
-            # Validate signal
-            is_valid = risk_manager.validate_signal(signal)
+            is_valid = risk_manager_inst.validate_signal(signal)
             signal["validated"] = is_valid
         
-        return {
-            "symbol": symbol,
-            "signal": signal,
-            "timestamp": datetime.now().isoformat()
-        }
+        return JSONResponse(content={
+            "success": True,
+            "data": {
+                "symbol": symbol,
+                "signal": signal,
+                "timestamp": datetime.now().isoformat()
+            },
+            "error": None
+        })
     except Exception as e:
-        logger.error(f"Error generating trading signal: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error generating trading signal for {symbol}: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
-# Portfolio and risk management endpoints
+# --- Portfolio and risk management endpoints ---
 @router.get("/portfolio")
-async def get_portfolio(risk_manager: RiskManager = Depends(get_risk_manager)):
+async def get_portfolio(risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)):
     """Get current portfolio status"""
     try:
+        # These methods are now present in RiskManager (as placeholders)
         portfolio = {
-            "positions": risk_manager.get_positions(),
-            "risk_metrics": risk_manager.calculate_risk_metrics(),
-            "total_pnl": risk_manager.calculate_total_pnl(),
-            "open_positions": len(risk_manager.get_open_positions())
+            "positions": risk_manager_inst.get_positions(),
+            "risk_metrics": risk_manager_inst.calculate_risk_metrics(),
+            "total_pnl": risk_manager_inst.calculate_total_pnl(),
+            "open_positions_count": len(risk_manager_inst.get_open_positions()) # Renamed for clarity
         }
-        return portfolio
+        return JSONResponse(content={"success": True, "data": portfolio, "error": None})
     except Exception as e:
         logger.error(f"Error fetching portfolio: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.get("/positions")
 async def get_positions(
     status: Optional[str] = None,
-    risk_manager: RiskManager = Depends(get_risk_manager)
+    risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)
 ):
     """Get positions with optional status filter"""
     try:
+        all_positions = risk_manager_inst.get_positions() # Use the new get_positions
         if status:
-            positions = [p for p in risk_manager.get_positions() if p["status"] == status.upper()]
+            positions = [p for p in all_positions if p.get("status", "").upper() == status.upper()]
         else:
-            positions = risk_manager.get_positions()
+            positions = all_positions
         
-        return {"positions": positions, "count": len(positions)}
+        return JSONResponse(content={"success": True, "data": {"positions": positions, "count": len(positions)}, "error": None})
     except Exception as e:
         logger.error(f"Error fetching positions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.get("/risk-metrics")
-async def get_risk_metrics(risk_manager: RiskManager = Depends(get_risk_manager)):
+async def get_risk_metrics(risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)):
     """Get current risk metrics"""
     try:
-        risk_metrics = risk_manager.calculate_risk_metrics()
-        return risk_metrics
+        risk_metrics = risk_manager_inst.calculate_risk_metrics()
+        return JSONResponse(content={"success": True, "data": risk_metrics, "error": None})
     except Exception as e:
         logger.error(f"Error calculating risk metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
-# Backtesting endpoints
+# --- Backtesting endpoints ---
 @router.post("/backtest")
 async def run_backtest(
     start_date: str,
     end_date: str,
     symbol: str = "NIFTY",
     strategy: str = "aria-lstm",
-    data_fetcher: DataFetcher = Depends(get_data_fetcher),
-    model_interface: ModelInterface = Depends(get_model_interface)
+    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
+    model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
 ):
     """Run backtesting for a specific period"""
     try:
-        # Fetch historical data
-        historical_data = await data_fetcher.fetch_historical_ohlcv(
+        historical_data = await data_fetcher_inst.fetch_historical_ohlcv(
             symbol, start_date, end_date
         )
         
-        # Run backtest logic (simplified)
-        backtest_results = await run_backtest_logic(
-            historical_data, strategy, model_interface
+        # We need to import run_backtest_logic from app.py or move it here
+        # For now, let's assume it's moved or accessible
+        from app import run_backtest_logic_helper # Renamed for clarity in app.py
+
+        backtest_results = await run_backtest_logic_helper(
+            historical_data, strategy, model_interface_inst
         )
         
-        return {
-            "strategy": strategy,
-            "period": f"{start_date} to {end_date}",
-            "results": backtest_results,
-            "timestamp": datetime.now().isoformat()
-        }
+        return JSONResponse(content={
+            "success": True,
+            "data": {
+                "strategy": strategy,
+                "period": f"{start_date} to {end_date}",
+                "results": backtest_results,
+                "timestamp": datetime.now().isoformat()
+            },
+            "error": None
+        })
     except Exception as e:
-        logger.error(f"Error running backtest: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error running backtest for {symbol}: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
 @router.post("/backtest/live")
 async def run_live_backtest(
     symbol: str = "NIFTY",
     hours: int = 1,
     strategy: str = "aria-lstm",
-    data_fetcher: DataFetcher = Depends(get_data_fetcher),
-    model_interface: ModelInterface = Depends(get_model_interface)
+    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
+    model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
 ):
     """Run backtest with live data from the last N hours"""
     try:
-        end_time = datetime.now()
-        start_time = end_time - timedelta(hours=hours)
+        # from app import run_backtest_logic_helper # Already imported if above
         
-        # Fetch recent live data
-        live_data = await data_fetcher.fetch_live_ohlcv(
+        live_data = await data_fetcher_inst.fetch_live_ohlcv(
             symbol, "1min", hours * 60
         )
         
-        # Run backtest logic
-        backtest_results = await run_backtest_logic(
-            live_data, strategy, model_interface
+        backtest_results = await run_backtest_logic_helper(
+            live_data, strategy, model_interface_inst
         )
         
-        return {
-            "strategy": strategy,
-            "period": f"Last {hours} hours",
-            "data_points": len(live_data),
-            "results": backtest_results,
-            "timestamp": datetime.now().isoformat()
-        }
+        return JSONResponse(content={
+            "success": True,
+            "data": {
+                "strategy": strategy,
+                "period": f"Last {hours} hours",
+                "data_points": len(live_data),
+                "results": backtest_results,
+                "timestamp": datetime.now().isoformat()
+            },
+            "error": None
+        })
     except Exception as e:
-        logger.error(f"Error running live backtest: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error running live backtest for {symbol}: {e}")
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
-# Connection status endpoint
+# --- Connection status endpoint ---
 @router.get("/connection-status")
 async def get_connection_status(
-    data_fetcher: DataFetcher = Depends(get_data_fetcher),
-    model_interface: ModelInterface = Depends(get_model_interface)
+    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
+    model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
 ):
     """Get status of all external connections"""
     try:
         status = {
-            "zerodha": await data_fetcher.test_zerodha_connection(),
-            "twelve_data": await data_fetcher.test_twelve_data_connection(),
-            "gemini": await model_interface.test_gemini_connection(),
-            "ollama": await model_interface.test_ollama_connection(),
+            "zerodha": await data_fetcher_inst.test_zerodha_connection(),
+            "twelve_data": await data_fetcher_inst.test_twelve_data_connection(),
+            "gemini": await model_interface_inst.test_gemini_connection(),
+            "ollama": await model_interface_inst.test_ollama_connection(),
             "last_update": datetime.now().isoformat()
         }
         
-        return {"connections": status, "overall_health": all(status.values())}
+        # Ensure all values are boolean for all()
+        overall_health = all(s for key, s in status.items() if key != "last_update")
+
+        return JSONResponse(content={"success": True, "data": {"connections": status, "overall_health": overall_health}, "error": None})
     except Exception as e:
         logger.error(f"Error checking connection status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
 
-# Helper function for backtesting logic
-async def run_backtest_logic(data: List[Dict], strategy: str, model_interface: ModelInterface):
-    """Simplified backtesting logic"""
-    portfolio_value = 100000
-    trades = []
-    
-    for i in range(10, len(data), 10):  # Every 10 data points
-        data_slice = data[i-10:i]
-        
-        try:
-            prediction = await model_interface.generate_prediction(data_slice)
-            
-            if prediction and prediction.get("confidence", 0) > 70:
-                # Simulate trade
-                entry_price = data_slice[-1]["close"]
-                exit_price = data[min(i+5, len(data)-1)]["close"]
-                
-                is_bullish = prediction.get("direction") == "BULLISH"
-                pnl = (exit_price - entry_price) * 100 if is_bullish else (entry_price - exit_price) * 100
-                
-                portfolio_value += pnl
-                trades.append({
-                    "entry_time": data_slice[-1]["timestamp"],
-                    "entry_price": entry_price,
-                    "exit_price": exit_price,
-                    "pnl": pnl,
-                    "direction": "CALL" if is_bullish else "PUT",
-                    "confidence": prediction.get("confidence", 0)
-                })
-        except Exception as e:
-            logger.warning(f"Error in backtest iteration: {e}")
-            continue
-    
-    total_return = ((portfolio_value - 100000) / 100000) * 100
-    win_rate = len([t for t in trades if t["pnl"] > 0]) / len(trades) * 100 if trades else 0
-    
-    return {
-        "total_return_percent": round(total_return, 2),
-        "final_portfolio_value": round(portfolio_value, 2),
-        "total_trades": len(trades),
-        "win_rate_percent": round(win_rate, 1),
-        "recent_trades": trades[-10:] if trades else []
-    }
