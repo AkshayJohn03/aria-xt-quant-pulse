@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { ariaAPI } from '../lib/api/endpoints';
 
@@ -18,6 +17,29 @@ interface MarketData {
   aiSentiment: {
     direction: string;
     confidence: number;
+  };
+}
+
+interface PortfolioData {
+  positions: Array<{
+    symbol: string;
+    quantity: number;
+    avg_price: number;
+    current_price: number;
+    pnl: number;
+    product: string;
+    instrument_token: string;
+  }>;
+  holdings: Array<any>;
+  funds: {
+    available_cash: number;
+    free_margin: number;
+    used_margin: number;
+  };
+  metrics: {
+    total_pnl: number;
+    total_value: number;
+    active_positions: number;
   };
 }
 
@@ -55,14 +77,88 @@ export const useMarketData = () => {
 
   useEffect(() => {
     fetchMarketData();
-    const interval = setInterval(fetchMarketData, 5000); // Poll every 5 seconds
+    const interval = setInterval(fetchMarketData, 10000); // Poll every 10 seconds
     return () => clearInterval(interval);
   }, []);
 
   return { marketData, loading, error, refetch: fetchMarketData };
 };
 
-// Existing hooks remain the same for now, but will be updated later for real data
+export const usePortfolio = () => {
+  const [portfolio, setPortfolio] = useState<PortfolioData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchPortfolio = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      console.log('Fetching portfolio data from backend...');
+      const response = await ariaAPI.getPortfolio();
+      
+      console.log('Portfolio response:', response);
+      
+      if (response.success && response.data) {
+        setPortfolio(response.data as PortfolioData);
+        setError(null);
+      } else {
+        const errorMsg = response.error || "Failed to fetch portfolio data";
+        setError(errorMsg);
+        console.error('Portfolio fetch failed:', errorMsg);
+      }
+    } catch (err: any) {
+      const errorMsg = err.message || "Network error - is backend running?";
+      setError(errorMsg);
+      console.error('Portfolio fetch error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPortfolio();
+    const interval = setInterval(fetchPortfolio, 15000); // Poll every 15 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  return { portfolio, loading, error, refetch: fetchPortfolio };
+};
+
+export const useConnectionStatus = () => {
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const fetchStatus = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const response = await ariaAPI.getConnectionStatus();
+      
+      if (response.success && response.data) {
+        setStatus(response.data);
+        setError(null);
+      } else {
+        setError(response.error || 'Failed to fetch connection status');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Network error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000); // Poll every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  return { status, loading, error, refetch: fetchStatus };
+};
+
 export const usePredictions = () => {
   const [prediction, setPrediction] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -92,37 +188,6 @@ export const usePredictions = () => {
   }, []);
 
   return { prediction, loading, error, regenerate: generatePrediction };
-};
-
-export const usePortfolio = () => {
-  const [portfolio, setPortfolio] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const fetchPortfolio = async () => {
-    try {
-      setLoading(true);
-      const response = await ariaAPI.getPortfolio();
-      if (response.success) {
-        setPortfolio(response.data);
-        setError(null);
-      } else {
-        setError(response.error);
-      }
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPortfolio();
-    const interval = setInterval(fetchPortfolio, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return { portfolio, loading, error, refetch: fetchPortfolio };
 };
 
 export const useBacktest = () => {
@@ -159,36 +224,4 @@ export const useBacktest = () => {
   };
 
   return { results, loading, error, runBacktest, runLiveTest };
-};
-
-export const useConnectionStatus = () => {
-  const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  const fetchStatus = async () => {
-    try {
-      setLoading(true);
-      const response = await ariaAPI.getConnectionStatus();
-      if (response.success) {
-        setStatus(response.data);
-        setError(null);
-      } else {
-        // Handle the case where response might have an error property
-        setError('Failed to fetch connection status');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Network error or unexpected response.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return { status, loading, error, refetch: fetchStatus };
 };

@@ -24,7 +24,7 @@ load_dotenv()
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG, # CHANGED FROM INFO TO DEBUG
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('aria_xt.log'),
@@ -40,12 +40,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
+# Configure CORS with proper settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Vite default ports
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://localhost:5173", 
+        "https://*.lovableproject.com",
+        "*"  # Allow all origins for development
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -55,7 +60,7 @@ data_fetcher = DataFetcher(config_manager)
 model_interface = ModelInterface(config_manager)
 risk_manager = RiskManager(config_manager)
 signal_generator = SignalGenerator(config_manager, model_interface, risk_manager)
-trade_executor = TradeExecutor(config_manager, risk_manager)
+trade_executor = TradeExecutor(config_manager.config, risk_manager)
 telegram_notifier = TelegramNotifier(config_manager)
 
 # Global state
@@ -82,6 +87,9 @@ async def startup_event():
     
     # Initialize models
     await model_interface.initialize_models()
+    
+    # Connect to broker
+    await trade_executor.connect_to_broker()
     
     logger.info("Aria-xT Trading Engine started successfully")
 
@@ -113,6 +121,62 @@ async def test_api_connections():
 
 # Include API routes
 app.include_router(api_router, prefix="/api/v1")
+
+# Add portfolio endpoints
+@app.get("/api/v1/portfolio")
+async def get_portfolio():
+    """Get current portfolio positions and holdings"""
+    try:
+        positions = await trade_executor.get_positions()
+        holdings = await trade_executor.get_holdings()
+        funds = await trade_executor.get_funds()
+        
+        # Calculate portfolio metrics
+        total_pnl = sum(pos.get('pnl', 0) for pos in (positions or []))
+        total_value = sum(pos.get('current_price', 0) * pos.get('quantity', 0) for pos in (positions or []))
+        
+        return {
+            "success": True,
+            "data": {
+                "positions": positions or [],
+                "holdings": holdings or [],
+                "funds": funds or {},
+                "metrics": {
+                    "total_pnl": total_pnl,
+                    "total_value": total_value,
+                    "active_positions": len(positions or [])
+                }
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching portfolio: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.get("/api/v1/connection-status")
+async def get_connection_status():
+    """Get status of all API connections"""
+    try:
+        connections = await test_api_connections()
+        broker_connected = trade_executor.connected if hasattr(trade_executor, 'connected') else False
+        
+        return {
+            "success": True,
+            "data": {
+                "connections": connections,
+                "broker_connected": broker_connected,
+                "system_status": system_status,
+                "last_update": datetime.now().isoformat()
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting connection status: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 # Root endpoints
 @app.get("/")
