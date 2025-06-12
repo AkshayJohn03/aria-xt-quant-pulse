@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from core.config_manager import ConfigManager
 import httpx
 from kiteconnect import KiteConnect
+import yfinance as yf  # Add yfinance import
 
 logger = logging.getLogger(__name__)
 
@@ -36,42 +37,80 @@ class DataFetcher:
 
     async def fetch_market_data(self) -> Dict[str, Any]:
         """
-        Fetches real-time market data for NIFTY 50 and SENSEX using KiteConnect.
+        Fetches real-time market data for NIFTY 50 and SENSEX.
+        First tries Zerodha, then falls back to Yahoo Finance.
         Returns a dict with current value, change, and percentChange for each index.
         """
-        if not hasattr(self, 'kite') or self.kite is None:
-            # Try to get kite from config_manager or raise error
-            from kiteconnect import KiteConnect
-            api_key = self.config_manager.config.get('apis', {}).get('zerodha', {}).get('api_key')
-            access_token = self.config_manager.config.get('apis', {}).get('zerodha', {}).get('access_token')
-            if not api_key or not access_token:
-                raise RuntimeError("Zerodha API key or access token not set in config.")
-            self.kite = KiteConnect(api_key=api_key)
-            self.kite.set_access_token(access_token)
-
-        # Instrument tokens for NIFTY 50 and SENSEX
-        nifty_token = int(self.config_manager.config.get('data', {}).get('nifty_instrument_token', 256265))
-        sensex_token = int(self.config_manager.config.get('data', {}).get('sensex_instrument_token', 265))
-        tokens = [nifty_token, sensex_token]
         try:
-            ltp_data = await asyncio.to_thread(self.kite.ltp, 'NSE', [nifty_token, sensex_token])
-            # ltp_data is a dict: { 'NSE:256265': {...}, 'NSE:265': {...} }
-            result = {}
-            for token, label in zip(tokens, ['nifty', 'sensex']):
-                key = f'NSE:{token}'
-                if key in ltp_data:
-                    last_price = ltp_data[key]['last_price']
-                    change = ltp_data[key].get('change', 0)
-                    percent_change = ltp_data[key].get('net_change', 0)
-                    result[label] = {
-                        'value': last_price,
-                        'change': change,
-                        'percentChange': percent_change
-                    }
-            return result
+            # Try Zerodha first if available
+            if self.kite:
+                try:
+                    nifty_token = int(self.config_manager.config.get('data', {}).get('nifty_instrument_token', 256265))
+                    sensex_token = int(self.config_manager.config.get('data', {}).get('sensex_instrument_token', 265))
+                    ltp_data = await asyncio.to_thread(self.kite.ltp, 'NSE', [nifty_token, sensex_token])
+                    
+                    if ltp_data:  # If we got data from Zerodha
+                        result = {}
+                        for token, label in zip([nifty_token, sensex_token], ['nifty', 'sensex']):
+                            key = f'NSE:{token}'
+                            if key in ltp_data:
+                                last_price = ltp_data[key]['last_price']
+                                change = ltp_data[key].get('change', 0)
+                                percent_change = ltp_data[key].get('net_change', 0)
+                                result[label] = {
+                                    'value': last_price,
+                                    'change': change,
+                                    'percentChange': percent_change
+                                }
+                        if result:
+                            return result
+
+                except Exception as e:
+                    logger.warning(f"Failed to fetch data from Zerodha: {e}. Falling back to Yahoo Finance.")
+
+            # Fallback to Yahoo Finance
+            logger.info("Fetching data from Yahoo Finance...")
+            # Fetch NIFTY 50 data
+            nifty = yf.Ticker("^NSEI")
+            nifty_data = nifty.history(period="2d")
+            if not nifty_data.empty:
+                nifty_current = nifty_data['Close'].iloc[-1]
+                nifty_prev = nifty_data['Close'].iloc[-2]
+                nifty_change = nifty_current - nifty_prev
+                nifty_percent_change = (nifty_change / nifty_prev) * 100
+            else:
+                nifty_current = nifty_change = nifty_percent_change = 0
+
+            # Fetch SENSEX data
+            sensex = yf.Ticker("^BSESN")
+            sensex_data = sensex.history(period="2d")
+            if not sensex_data.empty:
+                sensex_current = sensex_data['Close'].iloc[-1]
+                sensex_prev = sensex_data['Close'].iloc[-2]
+                sensex_change = sensex_current - sensex_prev
+                sensex_percent_change = (sensex_change / sensex_prev) * 100
+            else:
+                sensex_current = sensex_change = sensex_percent_change = 0
+
+            return {
+                'nifty': {
+                    'value': round(nifty_current, 2),
+                    'change': round(nifty_change, 2),
+                    'percentChange': round(nifty_percent_change, 2)
+                },
+                'sensex': {
+                    'value': round(sensex_current, 2),
+                    'change': round(sensex_change, 2),
+                    'percentChange': round(sensex_percent_change, 2)
+                }
+            }
+
         except Exception as e:
-            logging.error(f"Failed to fetch market data from Zerodha: {e}")
-            return {}
+            logger.error(f"Failed to fetch market data from all sources: {e}")
+            return {
+                'nifty': {'value': 0, 'change': 0, 'percentChange': 0},
+                'sensex': {'value': 0, 'change': 0, 'percentChange': 0}
+            }
 
     async def fetch_live_ohlcv(self, symbol: str = "NIFTY50", timeframe: str = "1min", limit: int = 100) -> List[Dict]:
         """

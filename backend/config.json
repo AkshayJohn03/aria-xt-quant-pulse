@@ -1,14 +1,13 @@
-
 {
   "apis": {
     "zerodha": {
-      "api_key": null,
-      "api_secret": null,
-      "access_token": null,
+      "api_key": "",
+      "api_secret": "",
+      "access_token": "",
       "base_url": "https://api.kite.trade"
     },
     "twelve_data": {
-      "api_key": null,
+      "api_key": "",
       "base_url": "https://api.twelvedata.com"
     },
     "gemini": {
@@ -17,14 +16,19 @@
       "base_url": "https://generativelanguage.googleapis.com/v1beta"
     },
     "telegram": {
-      "bot_token": null,
-      "chat_id": null
+      "enabled": true,
+      "bot_token": "",
+      "chat_id": ""
     }
   },
   "trading": {
+    "max_positions": 5,
+    "max_loss_per_trade": 1000,
+    "max_daily_loss": 5000,
+    "target_profit": 500,
+    "stop_loss": 200,
     "max_risk_per_trade": 2.5,
     "trailing_stop_percent": 5.0,
-    "max_positions": 5,
     "capital_allocation": 100000,
     "min_confidence_threshold": 75.0,
     "enable_auto_trading": false
@@ -36,6 +40,8 @@
       "timeout": 30
     },
     "aria_lstm": {
+      "enabled": true,
+      "confidence_threshold": 0.75,
       "model_path": "models/aria_lstm.pth",
       "sequence_length": 60,
       "features": [
@@ -51,12 +57,16 @@
       "max_length": 512
     },
     "prophet": {
+      "enabled": true,
+      "confidence_threshold": 0.7,
       "seasonality_mode": "multiplicative",
       "yearly_seasonality": true,
       "weekly_seasonality": true,
       "daily_seasonality": false
     },
     "xgboost": {
+      "enabled": true,
+      "confidence_threshold": 0.8,
       "model_path": "models/xgboost_model.pkl",
       "feature_importance_threshold": 0.01
     }
@@ -74,7 +84,8 @@
     "max_history_days": 30,
     "cache_duration_minutes": 5,
     "nifty_instrument_token": "256265",
-    "sensex_instrument_token": "265"
+    "sensex_instrument_token": "265",
+    "banknifty_instrument_token": "260105"
   },
   "risk_management": {
     "max_drawdown_percent": 15.0,

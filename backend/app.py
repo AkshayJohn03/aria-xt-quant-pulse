@@ -19,44 +19,44 @@ from core.signal_generator import SignalGenerator
 from core.trade_executor import TradeExecutor
 from core.telegram_notifier import TelegramNotifier
 
+# Import API routes
+from api.endpoints import router
+
+# Import shared instances
+from core import instances
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG, # Keep this at DEBUG for detailed logs
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('aria_xt.log'),
-        logging.StreamHandler()
-    ]
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Aria-xT Quantitative Trading Engine",
-    description="Advanced AI-powered automated trading system for NIFTY50 options",
+    title="ARIA-XT Quant Pulse",
+    description="AI-powered Nifty options intraday trading system",
     version="1.0.0"
 )
 
-# CORS middleware to allow frontend access
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Adjust this to specific origins in production
+    allow_origins=["*"],  # In production, replace with specific origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Global instances (initialized on startup) - now truly global singletons
-config_manager: ConfigManager = ConfigManager() # Initialize here for global access
-data_fetcher: DataFetcher = DataFetcher(config_manager)
-model_interface: ModelInterface = ModelInterface(config_manager)
-risk_manager: RiskManager = RiskManager(config_manager)
-# Telegram notifier - use config_manager
-telegram_notifier: TelegramNotifier = TelegramNotifier(config_manager)
-signal_generator: SignalGenerator = SignalGenerator(config_manager.config, model_interface, risk_manager)
-trade_executor: TradeExecutor = TradeExecutor(config_manager.config, risk_manager, telegram_notifier) # Pass notifier
-
+# Initialize components
+try:
+    # Initialize all shared instances
+    instances.init_instances()
+    logger.info("All components initialized successfully")
+    
+except Exception as e:
+    logger.error(f"Error during initialization: {e}")
+    raise
 
 # Global state
 system_status = {
@@ -69,41 +69,29 @@ system_status = {
 
 @app.on_event("startup")
 async def startup_event():
-    """Application startup event handler."""
-    logger.info("Starting Aria-xT Trading Engine...")
-
-    # Configuration is already initialized globally, just validate
-    if not config_manager.validate_config():
-        logger.error("Invalid configuration detected. Please check your settings. Exiting startup.")
-        return # Return early if validation fails
-
-    # Test API Connections
-    await test_api_connections()
-
-    # Load AI models
-    logger.info("Initializing AI models...")
+    """Initialize components on startup"""
     try:
-        await model_interface.initialize_models() # Call the new initialize_models
-        logger.info("Model initialization complete")
+        # Load models
+        logger.info("Attempting to load all models...")
+        instances.model_interface.load_models()
+        
+        # Test connections
+        logger.info("Testing connections...")
+        # Add connection tests here if needed
+        
+        logger.info("Startup complete")
     except Exception as e:
-        logger.error(f"Error initializing one or more AI models: {e}. Some functionalities might be limited.")
-
-    # Connect to Broker (if not using mock)
-    # This might involve a login flow if access_token is not persistent
-    await trade_executor.connect_to_broker()
-
-    logger.info("Aria-xT Trading Engine started successfully.")
-
+        logger.error(f"Error during startup: {e}")
+        raise
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Application shutdown event handler."""
-    logger.info("Shutting down Aria-xT Trading Engine...")
-    if trade_executor:
-        await trade_executor.disconnect_broker() # Assuming a disconnect method
-    system_status["is_running"] = False
-    logger.info("Aria-xT Trading Engine shut down.")
-
+    """Cleanup on shutdown"""
+    try:
+        logger.info("Shutting down...")
+        # Add cleanup code here if needed
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
 
 # Define a health check/root endpoint
 @app.get("/")
@@ -138,7 +126,7 @@ async def start_trading(background_tasks: BackgroundTasks):
     background_tasks.add_task(trading_loop)
     
     logger.info("Automated trading started")
-    await telegram_notifier.send_message("🚀 Aria-xT Trading Engine Started!")
+    await instances.telegram_notifier.send_message("🚀 Aria-xT Trading Engine Started!")
     
     return JSONResponse(content={"message": "Trading system started successfully", "status": system_status})
 
@@ -148,7 +136,7 @@ async def stop_trading():
     system_status["is_running"] = False
     
     logger.info("Automated trading stopped")
-    await telegram_notifier.send_message("⏹️ Aria-xT Trading Engine Stopped!")
+    await instances.telegram_notifier.send_message("⏹️ Aria-xT Trading Engine Stopped!")
     
     return JSONResponse(content={"message": "Trading system stopped successfully", "status": system_status})
 
@@ -156,8 +144,8 @@ async def stop_trading():
 async def get_system_status():
     """Get current system status"""
     # Update real-time metrics
-    system_status["active_trades"] = len(risk_manager.get_open_positions())
-    system_status["total_pnl"] = risk_manager.calculate_total_pnl()
+    system_status["active_trades"] = len(instances.risk_manager.get_open_positions())
+    system_status["total_pnl"] = instances.risk_manager.calculate_total_pnl()
     
     return JSONResponse(content=system_status)
 
@@ -175,12 +163,12 @@ async def test_api_connections():
     }
 
     # Call test methods on globally initialized instances
-    connection_statuses["zerodha"] = await data_fetcher.test_zerodha_connection()
-    connection_statuses["twelve_data"] = await data_fetcher.test_twelve_data_connection()
-    connection_statuses["gemini"] = await model_interface.test_gemini_connection()
-    connection_statuses["ollama"] = await model_interface.test_ollama_connection()
+    connection_statuses["zerodha"] = await instances.data_fetcher.test_zerodha_connection()
+    connection_statuses["twelve_data"] = await instances.data_fetcher.test_twelve_data_connection()
+    connection_statuses["gemini"] = await instances.model_interface.test_gemini_connection()
+    connection_statuses["ollama"] = await instances.model_interface.test_ollama_connection()
     # Telegram connection test also
-    connection_statuses["telegram"] = await telegram_notifier.test_connection()
+    connection_statuses["telegram"] = await instances.telegram_notifier.test_connection()
 
 
     for service, status in connection_statuses.items():
@@ -197,8 +185,8 @@ async def trading_loop():
     while system_status["is_running"]:
         try:
             # Fetch latest market data
-            market_data = await data_fetcher.fetch_market_data() # Changed from fetch_live_ohlcv
-            option_chain = await data_fetcher.fetch_option_chain()
+            market_data = await instances.data_fetcher.fetch_market_data() # Changed from fetch_live_ohlcv
+            option_chain = await instances.data_fetcher.fetch_option_chain()
             
             if not market_data or not option_chain:
                 logger.warning("Failed to fetch market data, skipping iteration")
@@ -206,28 +194,28 @@ async def trading_loop():
                 continue
             
             # Generate trading signals
-            signals = await signal_generator.generate_signals(market_data, option_chain)
+            signals = await instances.signal_generator.generate_signals(market_data, option_chain)
             
             # Process each signal
             for signal in signals:
-                if signal and risk_manager.validate_signal(signal):
+                if signal and instances.risk_manager.validate_signal(signal):
                     # Execute trade
-                    trade_result = await trade_executor.execute_trade(signal)
+                    trade_result = await instances.trade_executor.execute_trade(signal)
                     
                     if trade_result["success"]:
-                        await telegram_notifier.send_trade_notification(signal, trade_result)
+                        await instances.telegram_notifier.send_trade_notification(signal, trade_result)
                         logger.info(f"Trade executed: {signal}")
                     else:
                         logger.error(f"Trade execution failed: {trade_result['error']}")
             
             # Update positions and check exit conditions
-            await risk_manager.update_positions() # This needs to call TradeExecutor.get_positions() later
-            await risk_manager.check_exit_conditions() # This needs to call TradeExecutor.square_off_position() later
+            await instances.risk_manager.update_positions() # This needs to call TradeExecutor.get_positions() later
+            await instances.risk_manager.check_exit_conditions() # This needs to call TradeExecutor.square_off_position() later
             
             # Update system status
             system_status["last_update"] = datetime.now().isoformat()
-            system_status["active_trades"] = len(risk_manager.get_open_positions())
-            system_status["total_pnl"] = risk_manager.calculate_total_pnl()
+            system_status["active_trades"] = len(instances.risk_manager.get_open_positions())
+            system_status["total_pnl"] = instances.risk_manager.calculate_total_pnl()
             
             await asyncio.sleep(10) # 10-second intervals
             
@@ -280,10 +268,8 @@ async def run_backtest_logic_helper(data: List[Dict], strategy: str, model_inter
         "recent_trades": trades[-10:] if trades else []
     }
 
-
-# Import API routes after global instances are defined
-from api.endpoints import router as api_router
-app.include_router(api_router, prefix="/api/v1")
+# Include API router
+app.include_router(router, prefix="/api")
 
 if __name__ == "__main__":
     uvicorn.run(

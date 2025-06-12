@@ -36,6 +36,10 @@ class ModelInterface:
             except Exception as e:
                 logging.error(f"Failed to load {model_name}: {e}")
 
+    def is_model_loaded(self, model_name: str) -> bool:
+        """Check if a specific model is loaded."""
+        return model_name in self.models and self.models[model_name] is not None
+
     async def predict_trend(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Aria LSTM trend prediction"""
         try:

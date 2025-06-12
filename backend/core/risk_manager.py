@@ -1,17 +1,34 @@
-
 import logging
 from typing import Dict, Any, List, Optional
 import random
+from datetime import datetime
+
+import pandas as pd
+import numpy as np
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
 class RiskManager:
-    def __init__(self, config):
-        self.config = config.config # Access the raw config dictionary
+    def __init__(self, trade_executor, config_manager):
+        self.trade_executor = trade_executor
+        self.config = config_manager
+        self.sector_mapping = {
+            'NIFTY': 'Index',
+            'BANKNIFTY': 'Banking',
+            'RELIANCE': 'Energy',
+            'TCS': 'Technology',
+            'HDFCBANK': 'Banking',
+            'INFY': 'Technology',
+            'ICICIBANK': 'Banking',
+            'ITC': 'FMCG',
+            'HINDUNILVR': 'FMCG',
+            'SBIN': 'Banking',
+            # Add more mappings as needed
+        }
         self.max_daily_loss = self.config.get("risk_management.max_drawdown_percent", 2.0)
         self.max_per_trade_loss = self.config.get("trading.max_risk_per_trade", 0.5)
         self.max_open_positions = self.config.get("trading.max_positions", 5)
-        self.trade_executor = None  # Will be set by TradeExecutor
         
         logger.info(f"RiskManager initialized. Risk Limits: Max Daily Loss {self.max_daily_loss}%, Max Per Trade Loss {self.max_per_trade_loss}%, Max Open Positions {self.max_open_positions}")
 
@@ -20,15 +37,37 @@ class RiskManager:
         self.trade_executor = trade_executor
 
     def validate_signal(self, signal: Dict[str, Any]) -> bool:
-        """Validates a trading signal against predefined risk rules."""
+        """Validate a trading signal against risk parameters."""
         try:
-            positions = self.get_open_positions()
-            if len(positions) >= self.max_open_positions:
-                logger.warning(f"Validation failed: Max open positions ({self.max_open_positions}) reached.")
+            # Get current risk metrics
+            risk_metrics = self.calculate_risk_metrics()
+            
+            # Basic risk checks
+            if risk_metrics['portfolio_exposure_percent'] > self.config.get('max_portfolio_exposure_percent', 80):
+                logger.warning("Signal rejected: Portfolio exposure too high")
+                return False
+                
+            if risk_metrics['risk_score'] == 'HIGH':
+                logger.warning("Signal rejected: Portfolio risk score is HIGH")
                 return False
             
-            logger.info(f"Signal validated: {signal.get('symbol')} ({signal.get('type')})")
+            # Check sector exposure
+            symbol = signal.get('symbol', '')
+            sector = self.get_sector_for_symbol(symbol)
+            sector_exposure = risk_metrics['sector_exposure'].get(sector, {}).get('exposure', 0)
+            
+            if sector_exposure > self.config.get('max_sector_exposure_percent', 30):
+                logger.warning(f"Signal rejected: {sector} sector exposure too high")
+                return False
+            
+            # Signal specific checks
+            signal_risk = signal.get('risk_score', 0)
+            if signal_risk > self.config.get('max_signal_risk_score', 0.8):
+                logger.warning("Signal rejected: Signal risk score too high")
+                return False
+            
             return True
+            
         except Exception as e:
             logger.error(f"Error validating signal: {e}")
             return False
@@ -65,27 +104,45 @@ class RiskManager:
             logger.error(f"Error checking exit conditions: {e}")
 
     def get_open_positions(self) -> List[Dict[str, Any]]:
-        """Returns currently open positions."""
-        try:
-            if self.trade_executor and hasattr(self.trade_executor, 'cached_positions'):
-                return [pos for pos in self.trade_executor.cached_positions if pos.get("quantity", 0) != 0]
-            
-            # Fallback to mock data if no real executor
-            return self._get_mock_positions()
-        except Exception as e:
-            logger.error(f"Error getting open positions: {e}")
-            return []
+        """Get only open positions."""
+        return [p for p in self.get_positions() if p.get('quantity', 0) != 0]
 
     def get_positions(self) -> List[Dict[str, Any]]:
-        """Returns all tracked positions."""
+        """Get enhanced position details."""
         try:
-            if self.trade_executor and hasattr(self.trade_executor, 'cached_positions'):
-                return self.trade_executor.cached_positions
+            positions = self.trade_executor.get_positions()
+            enhanced_positions = []
             
-            return self._get_mock_positions()
+            for position in positions:
+                symbol = position.get('symbol', '')
+                quantity = position.get('quantity', 0)
+                avg_price = position.get('average_price', 0)
+                current_price = position.get('last_price', 0)
+                
+                # Calculate P&L
+                investment = abs(quantity * avg_price)
+                current_value = abs(quantity * current_price)
+                total_pnl = current_value - investment
+                
+                enhanced_positions.append({
+                    'symbol': symbol,
+                    'quantity': quantity,
+                    'avg_price': avg_price,
+                    'current_price': current_price,
+                    'pnl': total_pnl,
+                    'day_pnl': position.get('day_pnl', 0),
+                    'product_type': position.get('product', 'N/A'),
+                    'sector': self.get_sector_for_symbol(symbol),
+                    'last_trade_time': position.get('last_trade_time', ''),
+                    'unrealized_pnl': position.get('unrealized_pnl', 0),
+                    'realized_pnl': position.get('realized_pnl', 0)
+                })
+            
+            return enhanced_positions
+            
         except Exception as e:
             logger.error(f"Error getting positions: {e}")
-            return []
+            raise HTTPException(status_code=500, detail=str(e))
 
     def get_holdings(self) -> List[Dict[str, Any]]:
         """Returns current holdings."""
@@ -110,39 +167,100 @@ class RiskManager:
             return self._get_mock_funds()
 
     def calculate_risk_metrics(self) -> Dict[str, Any]:
-        """Calculates and returns key risk metrics for the portfolio."""
+        """Calculate comprehensive risk metrics for the portfolio."""
         try:
-            positions = self.get_positions()
-            funds = self.get_funds()
+            # Get portfolio data
+            positions = self.trade_executor.get_positions()
+            holdings = self.trade_executor.get_holdings()
+            funds = self.trade_executor.get_funds()
             
-            total_pnl = self.calculate_total_pnl()
-            total_investment = sum(abs(pos.get("avg_price", 0) * pos.get("quantity", 0)) for pos in positions)
-            portfolio_value = funds.get("available_cash", 0) + total_investment + total_pnl
-
+            # Initialize metrics
+            total_investment = 0
+            portfolio_value = 0
+            total_pnl = 0
+            day_pnl = 0
+            sector_exposure = {}
+            
+            # Process positions and holdings
+            all_instruments = positions + holdings
+            
+            for instrument in all_instruments:
+                quantity = instrument.get('quantity', 0)
+                avg_price = instrument.get('average_price', 0)
+                current_price = instrument.get('last_price', 0)
+                
+                investment = abs(quantity * avg_price)
+                current_value = abs(quantity * current_price)
+                
+                total_investment += investment
+                portfolio_value += current_value
+                total_pnl += (current_value - investment)
+                day_pnl += instrument.get('day_pnl', 0)
+                
+                # Calculate sector-wise exposure
+                sector = self.get_sector_for_symbol(instrument.get('symbol', ''))
+                if sector not in sector_exposure:
+                    sector_exposure[sector] = {
+                        'exposure': 0,
+                        'risk_score': 'LOW'
+                    }
+                
+                sector_exposure[sector]['exposure'] += (current_value / portfolio_value * 100 if portfolio_value > 0 else 0)
+            
+            # Update sector risk scores based on exposure
+            for sector in sector_exposure:
+                exposure = sector_exposure[sector]['exposure']
+                if exposure > 30:
+                    sector_exposure[sector]['risk_score'] = 'HIGH'
+                elif exposure > 15:
+                    sector_exposure[sector]['risk_score'] = 'MEDIUM'
+                else:
+                    sector_exposure[sector]['risk_score'] = 'LOW'
+            
+            # Calculate portfolio risk score
+            max_sector_exposure = max([data['exposure'] for data in sector_exposure.values()], default=0)
+            portfolio_exposure = (portfolio_value / funds.get('equity', 1)) * 100
+            
+            risk_score = 'HIGH' if max_sector_exposure > 30 or portfolio_exposure > 80 else \
+                        'MEDIUM' if max_sector_exposure > 15 or portfolio_exposure > 50 else \
+                        'LOW'
+            
+            # Calculate additional risk metrics
+            returns = [instrument.get('day_pnl', 0) / instrument.get('average_price', 1) 
+                      for instrument in all_instruments if instrument.get('average_price', 0) != 0]
+            
+            sharpe_ratio = np.mean(returns) / np.std(returns) if returns and np.std(returns) != 0 else 0
+            sortino_ratio = np.mean(returns) / np.std([r for r in returns if r < 0]) if returns else 0
+            max_drawdown = min(returns) if returns else 0
+            current_drawdown = (portfolio_value - total_investment) / total_investment if total_investment > 0 else 0
+            
             return {
-                "portfolio_value": round(portfolio_value, 2),
-                "total_investment": round(total_investment, 2),
-                "total_pnl": total_pnl,
-                "risk_score": self._calculate_risk_score(total_pnl, total_investment),
-                "max_drawdown": random.uniform(1.0, 10.0),  # TODO: Calculate real drawdown
-                "current_drawdown": random.uniform(0.5, 5.0),
-                "sharpe_ratio": random.uniform(0.8, 1.5),
-                "sortino_ratio": random.uniform(1.0, 2.0),
-                "portfolio_exposure_percent": min(100, (total_investment / max(portfolio_value, 1)) * 100),
-                "max_risk_per_trade_percent": self.max_per_trade_loss
+                'total_investment': total_investment,
+                'portfolio_value': portfolio_value,
+                'total_pnl': total_pnl,
+                'day_pnl': day_pnl,
+                'available_balance': funds.get('available', {}).get('cash', 0),
+                'risk_score': risk_score,
+                'portfolio_exposure_percent': portfolio_exposure,
+                'sector_exposure': sector_exposure,
+                'max_drawdown': max_drawdown,
+                'current_drawdown': current_drawdown,
+                'sharpe_ratio': sharpe_ratio,
+                'sortino_ratio': sortino_ratio,
+                'max_risk_per_trade_percent': self.max_per_trade_loss
             }
+            
         except Exception as e:
             logger.error(f"Error calculating risk metrics: {e}")
-            return self._get_mock_risk_metrics()
+            raise HTTPException(status_code=500, detail=str(e))
 
     def calculate_total_pnl(self) -> float:
-        """Calculates the total PnL across all positions."""
+        """Calculate total P&L across all positions."""
         try:
-            positions = self.get_positions()
-            total_pnl = sum(pos.get("pnl", 0) for pos in positions)
-            return round(total_pnl, 2)
+            risk_metrics = self.calculate_risk_metrics()
+            return risk_metrics.get('total_pnl', 0.0)
         except Exception as e:
-            logger.error(f"Error calculating total PnL: {e}")
+            logger.error(f"Error calculating total P&L: {e}")
             return 0.0
 
     def _calculate_risk_score(self, total_pnl: float, total_investment: float) -> str:
@@ -212,3 +330,7 @@ class RiskManager:
             "portfolio_exposure_percent": 50.0,
             "max_risk_per_trade_percent": self.max_per_trade_loss
         }
+
+    def get_sector_for_symbol(self, symbol: str) -> str:
+        """Get the sector for a given symbol."""
+        return self.sector_mapping.get(symbol.upper(), 'Others')

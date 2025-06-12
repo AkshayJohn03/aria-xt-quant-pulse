@@ -4,6 +4,8 @@ import random
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
+import pytz
+from fastapi import HTTPException
 
 # Attempt to import KiteConnect, allow for mock if not installed
 try:
@@ -274,61 +276,64 @@ class TradeExecutor:
     Manages connections to brokerage APIs, places orders, and fetches trade-related data.
     """
     
-    def __init__(self, config: Dict[str, Any], risk_manager: Any, telegram_notifier: Any):
-        self.config = config
-        self.risk_manager = risk_manager
-        self.telegram_notifier = telegram_notifier
-        self.live_trading_enabled = config.get("trading.live_trading_enabled", False)
-        self.broker_client = None
+    def __init__(self, config_manager):
+        self.config = config_manager
+        self.kite: Optional[KiteConnect] = None
         self.connected = False
-        
-        # Cache for portfolio data
         self.cached_positions = []
         self.cached_holdings = []
         self.cached_funds = {}
-        self.last_update = None
+        self.last_cache_update = None
+        self.cache_ttl = 3600  # 1 hour in seconds
+        self.risk_manager = None  # Will be set by RiskManager
         
-        # Set reference in risk manager
-        if risk_manager:
-            risk_manager.set_trade_executor(self)
-        
-        logger.info(f"TradeExecutor initialized. Live trading enabled: {self.live_trading_enabled}")
+        # Initialize Kite connection
+        self._initialize_kite()
 
-    async def connect_to_broker(self) -> bool:
-        """Connect to the specified brokerage API."""
-        logger.info("Attempting to connect to brokerage API...")
-        
-        # Get Zerodha configuration
-        api_key = self.config.get("apis", {}).get("zerodha", {}).get("api_key")
-        access_token = self.config.get("apis", {}).get("zerodha", {}).get("access_token")
+    def set_risk_manager(self, risk_manager):
+        """Set the risk manager reference."""
+        self.risk_manager = risk_manager
 
-        if api_key and access_token and KITE_CONNECT_AVAILABLE:
-            try:
-                # Initialize KiteConnect client
-                kite = KiteConnect(api_key=api_key)
-                kite.set_access_token(access_token)
+    def _initialize_kite(self):
+        """Initialize Kite connection with API key and access token."""
+        try:
+            api_key = self.config.get("zerodha.api_key")
+            access_token = self.config.get("zerodha.access_token")
+            
+            if not api_key or not access_token:
+                logger.error("Missing Zerodha credentials")
+                return
+            
+            self.kite = KiteConnect(api_key=api_key)
+            self.kite.set_access_token(access_token)
+            self.connected = True
+            logger.info("Kite connection initialized successfully")
+            
+        except Exception as e:
+            logger.error(f"Error initializing Kite connection: {e}")
+            self.connected = False
+
+    def _update_cache(self):
+        """Update cached portfolio data."""
+        try:
+            if not self._should_update_cache():
+                return
                 
-                # Create broker adapter
-                self.broker_client = ZerodhaBroker(kite)
-                self.connected = await self.broker_client.connect()
+            if not self.connected or not self.kite:
+                logger.warning("Not connected to Kite. Cannot update cache.")
+                return
                 
-                if self.connected:
-                    logger.info("Successfully connected to Zerodha Kite.")
-                    # Initial data fetch
-                    await self.update_portfolio_cache()
-                    return True
-                else:
-                    logger.error("Failed to connect to Zerodha Kite.")
-                    
-            except Exception as e:
-                logger.error(f"Failed to initialize Zerodha connection: {e}")
-        
-        # Fallback to mock broker
-        logger.warning("Using Mock Broker for trading operations.")
-        self.broker_client = MockBroker()
-        self.connected = await self.broker_client.connect()
-        await self.update_portfolio_cache()
-        return self.connected
+            # Fetch fresh data
+            self.cached_positions = self.kite.positions().get('net', [])
+            self.cached_holdings = self.kite.holdings()
+            self.cached_funds = self.kite.margins()
+            
+            self.last_cache_update = datetime.now()
+            logger.info("Cache updated successfully")
+            
+        except Exception as e:
+            logger.error(f"Error updating cache: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     async def update_portfolio_cache(self):
         """Update cached portfolio data."""
@@ -337,54 +342,54 @@ class TradeExecutor:
                 self.cached_positions = await self.broker_client.get_positions() or []
                 self.cached_holdings = await self.broker_client.get_holdings() or []
                 self.cached_funds = await self.broker_client.get_funds() or {}
-                self.last_update = datetime.now()
+                self.last_cache_update = datetime.now()
                 logger.info(f"Portfolio cache updated: {len(self.cached_positions)} positions, {len(self.cached_holdings)} holdings")
             else:
                 logger.warning("No broker client available for portfolio update")
         except Exception as e:
             logger.error(f"Error updating portfolio cache: {e}")
 
-    async def get_portfolio_overview(self) -> Dict[str, Any]:
-        """Get complete portfolio overview."""
+    def get_portfolio_overview(self) -> Dict[str, Any]:
+        """Get comprehensive portfolio overview including positions, holdings, and risk metrics."""
         try:
-            # Update cache if stale (older than 30 seconds)
-            if not self.last_update or (datetime.now() - self.last_update).seconds > 30:
-                await self.update_portfolio_cache()
+            self._update_cache()
             
-            # Calculate metrics
-            total_pnl = sum(pos.get("pnl", 0) for pos in self.cached_positions)
-            open_positions_count = len([p for p in self.cached_positions if p.get("quantity", 0) != 0])
+            positions = self.get_positions()
+            holdings = self.get_holdings()
+            funds = self.get_funds()
             
-            risk_metrics = self.risk_manager.calculate_risk_metrics() if self.risk_manager else {}
+            # Calculate basic metrics
+            total_investment = sum(abs(pos.get('average_price', 0) * pos.get('quantity', 0)) 
+                                 for pos in positions + holdings)
+            current_value = sum(abs(pos.get('last_price', 0) * pos.get('quantity', 0)) 
+                              for pos in positions + holdings)
             
             return {
-                "positions": self.cached_positions,
-                "holdings": self.cached_holdings,
-                "funds": self.cached_funds,
-                "risk_metrics": risk_metrics,
-                "total_pnl": total_pnl,
-                "open_positions_count": open_positions_count,
-                "last_update": self.last_update.isoformat() if self.last_update else None
+                'positions': positions,
+                'holdings': holdings,
+                'funds': funds,
+                'open_positions_count': len([p for p in positions if p.get('quantity', 0) != 0]),
+                'total_holdings_count': len(holdings),
+                'risk_metrics': {
+                    'total_investment': total_investment,
+                    'portfolio_value': current_value,
+                    'total_pnl': current_value - total_investment,
+                    'day_pnl': sum(pos.get('day_pnl', 0) for pos in positions + holdings),
+                    'available_balance': funds.get('equity', {}).get('available', {}).get('cash', 0)
+                },
+                'last_update': self.last_cache_update.isoformat() if self.last_cache_update else None
             }
+            
         except Exception as e:
             logger.error(f"Error getting portfolio overview: {e}")
-            return {
-                "positions": [],
-                "holdings": [],
-                "funds": {},
-                "risk_metrics": {},
-                "total_pnl": 0.0,
-                "open_positions_count": 0,
-                "last_update": None,
-                "error": str(e)
-            }
+            raise HTTPException(status_code=500, detail=str(e))
 
     async def execute_trade(self, signal: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a trading signal."""
         try:
-            if not self.live_trading_enabled:
-                logger.info(f"Live trading disabled. Would execute: {signal}")
-                return {"success": True, "message": "Simulated trade execution", "signal": signal}
+            if not self.connected:
+                logger.info(f"Broker not connected. Would execute: {signal}")
+                return {"success": True, "message": "Broker not connected", "signal": signal}
             
             if not self.broker_client:
                 return {"success": False, "error": "No broker connection available"}
@@ -438,7 +443,177 @@ class TradeExecutor:
         """Disconnect from broker."""
         try:
             self.connected = False
+            self.kite = None
             self.broker_client = None
             logger.info("Disconnected from broker.")
         except Exception as e:
             logger.error(f"Error disconnecting from broker: {e}")
+
+    def get_positions(self) -> List[Dict[str, Any]]:
+        """Get enhanced position details."""
+        try:
+            self.update_portfolio_cache()
+            
+            enhanced_positions = []
+            for position in self.cached_positions:
+                # Calculate P&L
+                quantity = position.get('quantity', 0)
+                avg_price = position.get('average_price', 0)
+                current_price = position.get('last_price', 0)
+                day_open = position.get('day_open_price', avg_price)
+                
+                investment = abs(quantity * avg_price)
+                current_value = abs(quantity * current_price)
+                day_value = abs(quantity * day_open)
+                
+                total_pnl = current_value - investment
+                day_pnl = current_value - day_value
+                
+                enhanced_positions.append({
+                    'symbol': position.get('tradingsymbol', ''),
+                    'exchange': position.get('exchange', ''),
+                    'quantity': quantity,
+                    'avg_price': avg_price,
+                    'current_price': current_price,
+                    'pnl': total_pnl,
+                    'day_pnl': day_pnl,
+                    'product_type': position.get('product', 'N/A'),
+                    'last_trade_time': position.get('last_trade_time', ''),
+                    'unrealized_pnl': position.get('unrealized_pnl', 0),
+                    'realized_pnl': position.get('realized_pnl', 0)
+                })
+            
+            return enhanced_positions
+            
+        except Exception as e:
+            logger.error(f"Error getting positions: {e}")
+            raise Exception("Error getting positions")
+
+    def get_holdings(self) -> List[Dict[str, Any]]:
+        """Get holdings with enhanced details."""
+        try:
+            self.update_portfolio_cache()
+            
+            enhanced_holdings = []
+            for holding in self.cached_holdings:
+                quantity = holding.get('quantity', 0)
+                avg_price = holding.get('average_price', 0)
+                current_price = holding.get('last_price', 0)
+                day_open = holding.get('day_open_price', avg_price)
+                
+                investment = quantity * avg_price
+                current_value = quantity * current_price
+                day_value = quantity * day_open
+                
+                total_pnl = current_value - investment
+                day_pnl = current_value - day_value
+                
+                enhanced_holdings.append({
+                    'symbol': holding.get('tradingsymbol', ''),
+                    'exchange': holding.get('exchange', ''),
+                    'quantity': quantity,
+                    'avg_price': avg_price,
+                    'current_price': current_price,
+                    'pnl': total_pnl,
+                    'day_pnl': day_pnl,
+                    'product_type': 'CNC',  # Holdings are always delivery
+                    'last_trade_time': holding.get('last_trade_time', ''),
+                    'unrealized_pnl': total_pnl,  # For holdings, total PnL is unrealized
+                    'realized_pnl': 0  # No realized PnL for holdings until sold
+                })
+            
+            return enhanced_holdings
+            
+        except Exception as e:
+            logger.error(f"Error getting holdings: {e}")
+            raise Exception("Error getting holdings")
+
+    def get_funds(self) -> Dict[str, Any]:
+        """Get enhanced funds data."""
+        try:
+            self.update_portfolio_cache()
+            return self.cached_funds
+        except Exception as e:
+            logger.error(f"Error getting funds: {e}")
+            raise Exception("Error getting funds")
+
+    def place_order(self, order_params: Dict[str, Any]) -> Dict[str, Any]:
+        """Place an order with Zerodha."""
+        try:
+            if not self.connected or not self.broker_client:
+                raise Exception("Not connected to broker")
+                
+            order_id = self.broker_client.place_order(
+                variety=order_params.get('variety', 'regular'),
+                exchange=order_params.get('exchange', 'NSE'),
+                tradingsymbol=order_params.get('symbol'),
+                transaction_type=order_params.get('transaction_type'),
+                quantity=order_params.get('quantity'),
+                product=order_params.get('product', 'MIS'),
+                order_type=order_params.get('order_type', 'MARKET'),
+                price=order_params.get('price', 0),
+                trigger_price=order_params.get('trigger_price', 0)
+            )
+            
+            logger.info(f"Order placed successfully. Order ID: {order_id}")
+            return {"order_id": order_id, "status": "success"}
+            
+        except Exception as e:
+            logger.error(f"Error placing order: {e}")
+            raise Exception("Error placing order")
+
+    def modify_order(self, order_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Modify an existing order."""
+        try:
+            if not self.connected or not self.broker_client:
+                raise Exception("Not connected to broker")
+                
+            self.broker_client.modify_order(
+                order_id=order_id,
+                variety=params.get('variety', 'regular'),
+                quantity=params.get('quantity'),
+                price=params.get('price'),
+                trigger_price=params.get('trigger_price'),
+                order_type=params.get('order_type'),
+                validity=params.get('validity')
+            )
+            
+            logger.info(f"Order {order_id} modified successfully")
+            return {"order_id": order_id, "status": "success"}
+            
+        except Exception as e:
+            logger.error(f"Error modifying order: {e}")
+            raise Exception("Error modifying order")
+
+    def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        """Cancel an order."""
+        try:
+            if not self.connected or not self.broker_client:
+                raise Exception("Not connected to broker")
+                
+            self.broker_client.cancel_order(order_id=order_id, variety='regular')
+            
+            logger.info(f"Order {order_id} cancelled successfully")
+            return {"order_id": order_id, "status": "success"}
+            
+        except Exception as e:
+            logger.error(f"Error cancelling order: {e}")
+            raise Exception("Error cancelling order")
+
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        """Get the current status of an order."""
+        try:
+            if not self.connected or not self.broker_client:
+                raise Exception("Not connected to broker")
+                
+            orders = self.broker_client.orders()
+            order = next((o for o in orders if o['order_id'] == order_id), None)
+            
+            if not order:
+                raise Exception(f"Order {order_id} not found")
+                
+            return order
+            
+        except Exception as e:
+            logger.error(f"Error getting order status: {e}")
+            raise Exception("Error getting order status")
