@@ -4,6 +4,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { usePortfolio } from '@/hooks/useAriaAPI';
 
+interface RiskMetrics {
+  total_investment?: number;
+  portfolio_value?: number;
+  total_pnl?: number;
+  risk_score?: string;
+  portfolio_exposure_percent?: number;
+  max_drawdown?: number;
+  current_drawdown?: number;
+  sharpe_ratio?: number;
+  sortino_ratio?: number;
+  max_risk_per_trade_percent?: number;
+}
+
 const Portfolio: React.FC = () => {
   const { portfolio, loading, error } = usePortfolio();
 
@@ -35,8 +48,8 @@ const Portfolio: React.FC = () => {
     );
   }
 
-  // Safely access nested data with defaults
-  const riskMetrics = portfolio.risk_metrics || {};
+  // Safely access nested data with defaults and proper typing
+  const riskMetrics: RiskMetrics = portfolio.risk_metrics || {};
   const totalInvestment = riskMetrics.total_investment || 0;
   const currentValue = riskMetrics.portfolio_value || 0;
   const totalPnl = riskMetrics.total_pnl || 0;

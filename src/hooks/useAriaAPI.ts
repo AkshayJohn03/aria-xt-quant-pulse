@@ -183,17 +183,17 @@ export const usePredictions = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const generatePrediction = async () => {
+  const generatePrediction = async (symbol: string = 'NIFTY', timeframe: string = '1min') => {
     try {
       setLoading(true);
-      const response = await ariaAPI.generatePrediction();
+      const response = await ariaAPI.generatePrediction(symbol, timeframe);
       if (response.success) {
         setPrediction(response.data);
         setError(null);
       } else {
         setError(response.error);
       }
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
@@ -202,7 +202,7 @@ export const usePredictions = () => {
 
   useEffect(() => {
     generatePrediction();
-    const interval = setInterval(generatePrediction, 30000); // Every 30 seconds
+    const interval = setInterval(() => generatePrediction(), 30000); // Every 30 seconds
     return () => clearInterval(interval);
   }, []);
 
@@ -224,7 +224,7 @@ export const useBacktest = () => {
       } else {
         setError(response.error);
       }
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
