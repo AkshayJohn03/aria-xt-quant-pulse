@@ -1,5 +1,3 @@
-# D:\aria\aria-xt-quant-pulse\backend\core\trade_executor.py
-
 import logging
 import asyncio
 import random
@@ -16,8 +14,7 @@ except ImportError:
     KiteConnect = None
     KITE_CONNECT_AVAILABLE = False
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # --- Abstract Base Class for Broker Clients ---
 class BrokerBase:
@@ -276,19 +273,30 @@ class TradeExecutor:
     """
     Manages connections to brokerage APIs, places orders, and fetches trade-related data.
     """
+    
     def __init__(self, config: Dict[str, Any], risk_manager: Any, telegram_notifier: Any):
         self.config = config
         self.risk_manager = risk_manager
-        self.telegram_notifier = telegram_notifier # Store the notifier
+        self.telegram_notifier = telegram_notifier
         self.live_trading_enabled = config.get("trading.live_trading_enabled", False)
-        self.broker = None  # Will be set in connect_to_broker or _initialize_broker
+        self.broker_client = None
         self.connected = False
-
-        logging.info(f"TradeExecutor initialized. Live trading enabled: {self.live_trading_enabled}")
+        
+        # Cache for portfolio data
+        self.cached_positions = []
+        self.cached_holdings = []
+        self.cached_funds = {}
+        self.last_update = None
+        
+        # Set reference in risk manager
+        if risk_manager:
+            risk_manager.set_trade_executor(self)
+        
+        logger.info(f"TradeExecutor initialized. Live trading enabled: {self.live_trading_enabled}")
 
     async def connect_to_broker(self) -> bool:
         """Connect to the specified brokerage API."""
-        logging.info("Attempting to connect to brokerage API...")
+        logger.info("Attempting to connect to brokerage API...")
         
         # Get Zerodha configuration
         api_key = self.config.get("apis", {}).get("zerodha", {}).get("api_key")
@@ -305,30 +313,106 @@ class TradeExecutor:
                 self.connected = await self.broker_client.connect()
                 
                 if self.connected:
-                    logging.info("Successfully connected to Zerodha Kite.")
+                    logger.info("Successfully connected to Zerodha Kite.")
+                    # Initial data fetch
+                    await self.update_portfolio_cache()
                     return True
                 else:
-                    logging.error("Failed to connect to Zerodha Kite.")
+                    logger.error("Failed to connect to Zerodha Kite.")
                     
             except Exception as e:
-                logging.error(f"Failed to initialize Zerodha connection: {e}")
+                logger.error(f"Failed to initialize Zerodha connection: {e}")
         
         # Fallback to mock broker
-        logging.warning("Using Mock Broker for trading operations.")
+        logger.warning("Using Mock Broker for trading operations.")
         self.broker_client = MockBroker()
         self.connected = await self.broker_client.connect()
+        await self.update_portfolio_cache()
         return self.connected
+
+    async def update_portfolio_cache(self):
+        """Update cached portfolio data."""
+        try:
+            if self.broker_client:
+                self.cached_positions = await self.broker_client.get_positions() or []
+                self.cached_holdings = await self.broker_client.get_holdings() or []
+                self.cached_funds = await self.broker_client.get_funds() or {}
+                self.last_update = datetime.now()
+                logger.info(f"Portfolio cache updated: {len(self.cached_positions)} positions, {len(self.cached_holdings)} holdings")
+            else:
+                logger.warning("No broker client available for portfolio update")
+        except Exception as e:
+            logger.error(f"Error updating portfolio cache: {e}")
+
+    async def get_portfolio_overview(self) -> Dict[str, Any]:
+        """Get complete portfolio overview."""
+        try:
+            # Update cache if stale (older than 30 seconds)
+            if not self.last_update or (datetime.now() - self.last_update).seconds > 30:
+                await self.update_portfolio_cache()
+            
+            # Calculate metrics
+            total_pnl = sum(pos.get("pnl", 0) for pos in self.cached_positions)
+            open_positions_count = len([p for p in self.cached_positions if p.get("quantity", 0) != 0])
+            
+            risk_metrics = self.risk_manager.calculate_risk_metrics() if self.risk_manager else {}
+            
+            return {
+                "positions": self.cached_positions,
+                "holdings": self.cached_holdings,
+                "funds": self.cached_funds,
+                "risk_metrics": risk_metrics,
+                "total_pnl": total_pnl,
+                "open_positions_count": open_positions_count,
+                "last_update": self.last_update.isoformat() if self.last_update else None
+            }
+        except Exception as e:
+            logger.error(f"Error getting portfolio overview: {e}")
+            return {
+                "positions": [],
+                "holdings": [],
+                "funds": {},
+                "risk_metrics": {},
+                "total_pnl": 0.0,
+                "open_positions_count": 0,
+                "last_update": None,
+                "error": str(e)
+            }
+
+    async def execute_trade(self, signal: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a trading signal."""
+        try:
+            if not self.live_trading_enabled:
+                logger.info(f"Live trading disabled. Would execute: {signal}")
+                return {"success": True, "message": "Simulated trade execution", "signal": signal}
+            
+            if not self.broker_client:
+                return {"success": False, "error": "No broker connection available"}
+            
+            # Place order
+            order_result = await self.place_order(signal)
+            
+            if order_result and order_result.get("status") == "success":
+                # Update cache after trade
+                await self.update_portfolio_cache()
+                return {"success": True, "order_result": order_result}
+            else:
+                return {"success": False, "error": order_result.get("error", "Unknown error")}
+                
+        except Exception as e:
+            logger.error(f"Error executing trade: {e}")
+            return {"success": False, "error": str(e)}
 
     async def place_order(self, order_details: Dict[str, Any], max_retries: int = 3) -> Optional[Dict[str, Any]]:
         """Places an order on the brokerage platform with retry logic."""
         if not self.broker_client:
-            logging.error("Broker client not initialized. Cannot place order.")
+            logger.error("Broker client not initialized. Cannot place order.")
             return None
 
         # Check risk limits before placing order
         trade_value = order_details.get('price', 0) * order_details.get('quantity', 0)
-        if not self.risk_manager.check_per_trade_risk(trade_value):
-            logging.warning(f"Order placement aborted due to per-trade risk limit: {order_details}")
+        if self.risk_manager and not self.risk_manager.check_per_trade_risk(trade_value):
+            logger.warning(f"Order placement aborted due to per-trade risk limit: {order_details}")
             return {"status": "aborted", "error": "Per-trade risk limit exceeded", "details": order_details}
         
         attempt = 0
@@ -336,59 +420,25 @@ class TradeExecutor:
             try:
                 result = await self.broker_client.place_order(order_details)
                 if result and result.get("status") == "success":
-                    logging.info(f"Order placed successfully: {result}")
+                    logger.info(f"Order placed successfully: {result}")
                     return result
                 else:
-                    logging.warning(f"Order attempt {attempt+1} failed: {result}. Retrying...")
+                    logger.warning(f"Order attempt {attempt+1} failed: {result}. Retrying...")
             except Exception as e:
-                logging.error(f"Order attempt {attempt+1} exception: {e}. Retrying...")
+                logger.error(f"Order attempt {attempt+1} exception: {e}. Retrying...")
             
             attempt += 1
             if attempt < max_retries:
-                time.sleep(2) # Backoff before retry
+                await asyncio.sleep(2)  # Async backoff before retry
         
-        logging.error(f"Order failed after {max_retries} attempts: {order_details}. Max retries exceeded.")
+        logger.error(f"Order failed after {max_retries} attempts: {order_details}. Max retries exceeded.")
         return {"status": "failed", "error": "Max retries exceeded", "details": order_details}
 
-    async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_order_status(order_id)
-
-    async def get_positions(self) -> Optional[List[Dict[str, Any]]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_positions()
-
-    async def get_holdings(self) -> Optional[List[Dict[str, Any]]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_holdings()
-
-    async def get_funds(self) -> Optional[Dict[str, Any]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_funds()
-
-    async def square_off_position(self, symbol: str, quantity: int = 0, product_type: str = "MIS") -> bool:
-        if not self.broker_client:
-            return False
-        return await self.broker_client.square_off_position(symbol, quantity, product_type)
-
-    async def get_portfolio_overview(self) -> Dict[str, Any]:
-        """
-        Fetches live portfolio details (positions, holdings, funds) from Zerodha and returns a summary dict.
-        """
-        positions = await self.get_positions() or []
-        holdings = await self.get_holdings() or []
-        funds = await self.get_funds() or {}
-        total_value = sum([p.get('current_price', 0) * abs(p.get('quantity', 0)) for p in positions])
-        total_holdings_value = sum([h.get('last_price', 0) * abs(h.get('quantity', 0)) for h in holdings])
-        return {
-            'positions': positions,
-            'holdings': holdings,
-            'funds': funds,
-            'total_value': total_value + total_holdings_value + funds.get('available_cash', 0),
-            'positions_count': len(positions),
-            'holdings_count': len(holdings)
-        }
+    async def disconnect_broker(self):
+        """Disconnect from broker."""
+        try:
+            self.connected = False
+            self.broker_client = None
+            logger.info("Disconnected from broker.")
+        except Exception as e:
+            logger.error(f"Error disconnecting from broker: {e}")

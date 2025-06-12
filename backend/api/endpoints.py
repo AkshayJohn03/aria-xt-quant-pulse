@@ -4,14 +4,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import logging
 
-from core.config_manager import ConfigManager
-from core.data_fetcher import DataFetcher
-from core.model_interface import ModelInterface
-from core.risk_manager import RiskManager
-from core.trade_executor import TradeExecutor
-
 # Import global instances from app.py to ensure singletons are used
-# IMPORTANT: These imports must be after config_manager, data_fetcher, etc. are defined in app.py
 from app import config_manager, data_fetcher, model_interface, risk_manager, signal_generator, trade_executor, telegram_notifier, system_status, run_backtest_logic_helper
 
 logger = logging.getLogger(__name__)
@@ -31,66 +24,80 @@ def get_model_interface_dep():
 def get_risk_manager_dep():
     return risk_manager
 
+# Helper function to standardize API responses
+def create_api_response(success: bool, data: Any = None, error: str = None, status_code: int = 200):
+    """Create standardized API response"""
+    response_data = {
+        "success": success,
+        "data": data,
+        "error": error
+    }
+    return JSONResponse(content=response_data, status_code=status_code)
+
 # --- Configuration endpoints ---
 @router.get("/config")
 async def get_config(config: ConfigManager = Depends(get_config_manager_dep)):
     """Get current configuration"""
     try:
-        return JSONResponse(content={"success": True, "data": config.config, "error": None})
+        return create_api_response(True, config.config)
     except Exception as e:
         logger.error(f"Error fetching configuration: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.post("/config")
-async def update_config(
-    updates: Dict[str, Any],
-    config: ConfigManager = Depends(get_config_manager_dep)
-):
+async def update_config(updates: Dict[str, Any], config: ConfigManager = Depends(get_config_manager_dep)):
     """Update configuration"""
     try:
         success = config.update_config(updates)
         if success:
-            return JSONResponse(content={"success": True, "data": {"message": "Configuration updated successfully"}, "error": None})
+            return create_api_response(True, {"message": "Configuration updated successfully"})
         else:
-            return JSONResponse(content={"success": False, "data": None, "error": "Failed to update configuration"}, status_code=500)
+            return create_api_response(False, error="Failed to update configuration", status_code=500)
     except Exception as e:
         logger.error(f"Error updating configuration: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.get("/config/validate")
 async def validate_config(config: ConfigManager = Depends(get_config_manager_dep)):
     """Validate current configuration"""
     try:
         is_valid = config.validate_config()
-        return JSONResponse(content={"success": True, "data": {"valid": is_valid}, "error": None})
+        return create_api_response(True, {"valid": is_valid})
     except Exception as e:
         logger.error(f"Error validating configuration: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        return create_api_response(False, error=str(e), status_code=500)
 
 # --- Market data endpoints ---
 @router.get("/market-data")
 async def get_market_data():
     """Get current market data (NIFTY 50, SENSEX) from Zerodha."""
     try:
-        from app import data_fetcher
         data = await data_fetcher.fetch_market_data()
-        # Ensure both keys are present, even if one or both are missing
+        
+        # Ensure proper structure for frontend
         result = {
-            "nifty": data.get("nifty") if data and "nifty" in data else {"value": None, "change": None, "percentChange": None},
-            "sensex": data.get("sensex") if data and "sensex" in data else {"value": None, "change": None, "percentChange": None},
-            "lastUpdate": datetime.now().isoformat()
+            "nifty": data.get("nifty", {"value": 0, "change": 0, "percentChange": 0}) if data else {"value": 0, "change": 0, "percentChange": 0},
+            "sensex": data.get("sensex", {"value": 0, "change": 0, "percentChange": 0}) if data else {"value": 0, "change": 0, "percentChange": 0},
+            "marketStatus": "OPEN",  # TODO: Get real market status
+            "lastUpdate": datetime.now().isoformat(),
+            "aiSentiment": {
+                "direction": "NEUTRAL",
+                "confidence": 50
+            }
         }
-        return JSONResponse(content={"success": True, "data": result, "error": None})
+        
+        return create_api_response(True, result)
     except Exception as e:
-        logging.error(f"Error fetching market data: {e}")
-        # Always return both keys with None values on error
+        logger.error(f"Error fetching market data: {e}")
+        # Return default structure on error
         result = {
-            "nifty": {"value": None, "change": None, "percentChange": None},
-            "sensex": {"value": None, "change": None, "percentChange": None},
-            "lastUpdate": datetime.now().isoformat()
+            "nifty": {"value": 0, "change": 0, "percentChange": 0},
+            "sensex": {"value": 0, "change": 0, "percentChange": 0},
+            "marketStatus": "CLOSED",
+            "lastUpdate": datetime.now().isoformat(),
+            "aiSentiment": {"direction": "NEUTRAL", "confidence": 0}
         }
-        return JSONResponse(content={"success": False, "data": result, "error": str(e)}, status_code=500)
+        return create_api_response(False, result, str(e), status_code=500)
 
 @router.get("/ohlcv/{symbol}")
 async def get_ohlcv_data(
@@ -102,10 +109,10 @@ async def get_ohlcv_data(
     """Get OHLCV data for a symbol"""
     try:
         ohlcv_data = await data_fetcher_inst.fetch_live_ohlcv(symbol, timeframe, limit)
-        return JSONResponse(content={"success": True, "data": {"symbol": symbol, "timeframe": timeframe, "data": ohlcv_data}, "error": None})
+        return create_api_response(True, {"symbol": symbol, "timeframe": timeframe, "data": ohlcv_data})
     except Exception as e:
         logger.error(f"Error fetching OHLCV data for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.get("/option-chain")
 async def get_option_chain(
@@ -116,10 +123,10 @@ async def get_option_chain(
     """Get option chain data"""
     try:
         option_chain = await data_fetcher_inst.fetch_option_chain(symbol, expiry)
-        return JSONResponse(content={"success": True, "data": {"symbol": symbol, "expiry": expiry, "data": option_chain}, "error": None})
+        return create_api_response(True, {"symbol": symbol, "expiry": expiry, "data": option_chain})
     except Exception as e:
         logger.error(f"Error fetching option chain for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        return create_api_response(False, error=str(e), status_code=500)
 
 # --- Model and prediction endpoints ---
 @router.post("/prediction")
@@ -184,12 +191,11 @@ async def generate_trading_signal(
 async def get_portfolio():
     """Get live portfolio overview (positions, holdings, funds) from Zerodha."""
     try:
-        from app import trade_executor
         data = await trade_executor.get_portfolio_overview()
-        return JSONResponse(content={"success": True, "data": data, "error": None})
+        return create_api_response(True, data)
     except Exception as e:
-        logging.error(f"Error fetching portfolio: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        logger.error(f"Error fetching portfolio: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.get("/positions")
 async def get_positions(
@@ -198,26 +204,26 @@ async def get_positions(
 ):
     """Get positions with optional status filter"""
     try:
-        all_positions = risk_manager_inst.get_positions() # Use the new get_positions
+        all_positions = risk_manager_inst.get_positions()
         if status:
             positions = [p for p in all_positions if p.get("status", "").upper() == status.upper()]
         else:
             positions = all_positions
         
-        return JSONResponse(content={"success": True, "data": {"positions": positions, "count": len(positions)}, "error": None})
+        return create_api_response(True, {"positions": positions, "count": len(positions)})
     except Exception as e:
         logger.error(f"Error fetching positions: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.get("/risk-metrics")
 async def get_risk_metrics(risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)):
     """Get current risk metrics"""
     try:
         risk_metrics = risk_manager_inst.calculate_risk_metrics()
-        return JSONResponse(content={"success": True, "data": risk_metrics, "error": None})
+        return create_api_response(True, risk_metrics)
     except Exception as e:
         logger.error(f"Error calculating risk metrics: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        return create_api_response(False, error=str(e), status_code=500)
 
 # --- Backtesting endpoints ---
 @router.post("/backtest")
@@ -290,37 +296,57 @@ async def run_live_backtest(
 
 # --- Connection status endpoint ---
 @router.get("/connection-status")
-async def get_connection_status(
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
-    model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
-):
-    """Get status of all external connections (robust to partial failures)"""
-    status = {}
-    # Zerodha
+async def get_connection_status():
+    """Get status of all external connections"""
     try:
-        status["zerodha"] = await data_fetcher_inst.test_zerodha_connection()
+        connections = {}
+        
+        # Test each connection safely
+        try:
+            connections["zerodha"] = await data_fetcher.test_zerodha_connection()
+        except Exception as e:
+            logger.error(f"Zerodha connection test failed: {e}")
+            connections["zerodha"] = False
+            
+        try:
+            connections["twelve_data"] = await data_fetcher.test_twelve_data_connection()
+        except Exception as e:
+            logger.error(f"Twelve Data connection test failed: {e}")
+            connections["twelve_data"] = False
+            
+        try:
+            connections["gemini"] = await model_interface.test_gemini_connection()
+        except Exception as e:
+            logger.error(f"Gemini connection test failed: {e}")
+            connections["gemini"] = False
+            
+        try:
+            connections["ollama"] = await model_interface.test_ollama_connection()
+        except Exception as e:
+            logger.error(f"Ollama connection test failed: {e}")
+            connections["ollama"] = False
+            
+        try:
+            connections["telegram"] = await telegram_notifier.test_connection()
+        except Exception as e:
+            logger.error(f"Telegram connection test failed: {e}")
+            connections["telegram"] = False
+
+        broker_connected = trade_executor.connected if trade_executor else False
+        
+        result = {
+            "connections": connections,
+            "broker_connected": broker_connected,
+            "system_status": {
+                "is_running": system_status.get("is_running", False),
+                "active_trades": len(risk_manager.get_open_positions()) if risk_manager else 0,
+                "total_pnl": risk_manager.calculate_total_pnl() if risk_manager else 0.0,
+                "system_health": system_status.get("system_health", "OK")
+            },
+            "last_update": datetime.now().isoformat()
+        }
+        
+        return create_api_response(True, result)
     except Exception as e:
-        logger.error(f"Zerodha connection check failed: {e}")
-        status["zerodha"] = False
-    # Twelve Data
-    try:
-        status["twelve_data"] = await data_fetcher_inst.test_twelve_data_connection()
-    except Exception as e:
-        logger.error(f"Twelve Data connection check failed: {e}")
-        status["twelve_data"] = False
-    # Gemini
-    try:
-        status["gemini"] = await model_interface_inst.test_gemini_connection()
-    except Exception as e:
-        logger.error(f"Gemini connection check failed: {e}")
-        status["gemini"] = False
-    # Ollama
-    try:
-        status["ollama"] = await model_interface_inst.test_ollama_connection()
-    except Exception as e:
-        logger.error(f"Ollama connection check failed: {e}")
-        status["ollama"] = False
-    status["last_update"] = datetime.now().isoformat()
-    # Ensure all values are boolean for all()
-    overall_health = all(s for key, s in status.items() if key != "last_update")
-    return JSONResponse(content={"success": True, "data": {"connections": status, "overall_health": overall_health}, "error": None})
+        logger.error(f"Error getting connection status: {e}")
+        return create_api_response(False, error=str(e), status_code=500)

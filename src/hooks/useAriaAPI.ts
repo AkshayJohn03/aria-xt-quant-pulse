@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { ariaAPI } from '../lib/api/endpoints';
 
@@ -27,8 +28,9 @@ interface PortfolioData {
     avg_price: number;
     current_price: number;
     pnl: number;
-    product: string;
-    instrument_token: string;
+    product_type: string;
+    timestamp: string;
+    status: string;
   }>;
   holdings: Array<any>;
   funds: {
@@ -36,11 +38,21 @@ interface PortfolioData {
     free_margin: number;
     used_margin: number;
   };
-  metrics: {
+  risk_metrics: {
+    portfolio_value: number;
+    total_investment: number;
     total_pnl: number;
-    total_value: number;
-    active_positions: number;
+    risk_score: string;
+    max_drawdown: number;
+    current_drawdown: number;
+    sharpe_ratio: number;
+    sortino_ratio: number;
+    portfolio_exposure_percent: number;
+    max_risk_per_trade_percent: number;
   };
+  total_pnl: number;
+  open_positions_count: number;
+  last_update: string | null;
 }
 
 export const useMarketData = () => {
@@ -126,25 +138,32 @@ export const usePortfolio = () => {
 };
 
 export const useConnectionStatus = () => {
-  const [status, setStatus] = useState(null);
+  const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchStatus = async () => {
     try {
       setLoading(true);
       setError(null);
       
+      console.log('Fetching connection status from backend...');
       const response = await ariaAPI.getConnectionStatus();
+      
+      console.log('Connection status response:', response);
       
       if (response.success && response.data) {
         setStatus(response.data);
         setError(null);
       } else {
-        setError(response.error || 'Failed to fetch connection status');
+        const errorMsg = response.error || 'Failed to fetch connection status';
+        setError(errorMsg);
+        console.error('Connection status fetch failed:', errorMsg);
       }
     } catch (err: any) {
-      setError(err.message || 'Network error');
+      const errorMsg = err.message || 'Network error - is backend running?';
+      setError(errorMsg);
+      console.error('Connection status fetch error:', err);
     } finally {
       setLoading(false);
     }
