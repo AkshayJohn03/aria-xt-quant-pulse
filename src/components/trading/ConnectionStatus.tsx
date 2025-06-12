@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +11,8 @@ import {
   TrendingUp,
   AlertCircle,
   CheckCircle,
-  RefreshCw
+  RefreshCw,
+  Brain
 } from 'lucide-react';
 import { useConnectionStatus } from '@/hooks/useAriaAPI';
 
@@ -64,6 +64,7 @@ const ConnectionStatus = () => {
   const connections = status?.connections || {};
   const brokerConnected = status?.broker_connected || false;
   const systemStatus = status?.system_status || {};
+  const modelStatus = status?.model_status || {};
 
   const getStatusIcon = (isConnected: boolean) => {
     return isConnected ? (
@@ -82,6 +83,29 @@ const ConnectionStatus = () => {
         {isConnected ? 'Connected' : 'Disconnected'}
       </Badge>
     );
+  };
+
+  // Format the last update time
+  const formatLastUpdate = (dateStr: string) => {
+    try {
+      // If the date is already in DD-MM-YYYY HH:mm:ss format, return as is
+      if (dateStr.match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/)) {
+        return dateStr;
+      }
+      // Otherwise, parse and format
+      const date = new Date(dateStr);
+      return date.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).replace(/\//g, '-');
+    } catch (e) {
+      return dateStr;
+    }
   };
 
   return (
@@ -152,6 +176,36 @@ const ConnectionStatus = () => {
         </CardContent>
       </Card>
 
+      {/* Model Status */}
+      <Card className="bg-slate-800/50 border-slate-700">
+        <CardHeader>
+          <CardTitle className="text-white text-sm flex items-center">
+            <Brain className="h-4 w-4 mr-2" />
+            Model Status
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-400">ARIA LSTM</span>
+            <Badge variant="outline" className={modelStatus.aria_lstm ? 'border-green-400 text-green-400' : 'border-red-400 text-red-400'}>
+              {modelStatus.aria_lstm ? 'Loaded' : 'Not Loaded'}
+            </Badge>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-400">XGBoost</span>
+            <Badge variant="outline" className={modelStatus.xgboost ? 'border-green-400 text-green-400' : 'border-red-400 text-red-400'}>
+              {modelStatus.xgboost ? 'Loaded' : 'Not Loaded'}
+            </Badge>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-400">Prophet</span>
+            <Badge variant="outline" className={modelStatus.prophet ? 'border-green-400 text-green-400' : 'border-red-400 text-red-400'}>
+              {modelStatus.prophet ? 'Loaded' : 'Not Loaded'}
+            </Badge>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* System Status */}
       <Card className="bg-slate-800/50 border-slate-700">
         <CardHeader>
@@ -180,7 +234,7 @@ const ConnectionStatus = () => {
           </div>
           {status?.last_update && (
             <div className="text-xs text-slate-500 mt-2">
-              Last update: {new Date(status.last_update).toLocaleTimeString()}
+              Last update: {formatLastUpdate(status.last_update)}
             </div>
           )}
         </CardContent>
