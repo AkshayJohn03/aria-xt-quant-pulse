@@ -1,7 +1,7 @@
 
 import logging
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 import uvicorn
 import asyncio
 from datetime import datetime, timedelta
@@ -48,12 +48,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configure CORS
+# Configure CORS with specific origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "https://*.lovable.app"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -83,6 +89,9 @@ async def startup_event():
         })
         
         logger.info("Startup completed successfully")
+        logger.info("Backend is now running on http://localhost:8000")
+        logger.info("API documentation: http://localhost:8000/docs")
+        
     except Exception as e:
         logger.error(f"Error during startup: {e}")
         update_system_status({
@@ -103,31 +112,63 @@ async def shutdown_event():
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
 
-# Root endpoint
-@app.get("/")
+# Root endpoint with HTML response for easy testing
+@app.get("/", response_class=HTMLResponse)
 async def root():
-    """Root endpoint for health check"""
-    return {
-        "status": "healthy",
-        "message": "Aria XT Quant Pulse API is running",
-        "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
-    }
+    """Root endpoint for testing - returns HTML page"""
+    html_content = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Aria XT Quant Pulse API</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; }
+            .status { color: green; font-weight: bold; }
+            .endpoint { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        </style>
+    </head>
+    <body>
+        <h1>🚀 Aria XT Quant Pulse API</h1>
+        <p class="status">✅ Backend Server is Running!</p>
+        <p><strong>Version:</strong> 1.0.0</p>
+        <p><strong>Time:</strong> {timestamp}</p>
+        
+        <h2>Available Endpoints:</h2>
+        <div class="endpoint"><strong>GET /health</strong> - Health check</div>
+        <div class="endpoint"><strong>GET /api/v1/market-data</strong> - Real-time market data</div>
+        <div class="endpoint"><strong>GET /api/v1/connection-status</strong> - Connection status</div>
+        <div class="endpoint"><strong>GET /api/v1/option-chain</strong> - Options chain data</div>
+        <div class="endpoint"><strong>GET /docs</strong> - API documentation</div>
+        
+        <h2>Quick Test:</h2>
+        <p><a href="/health" target="_blank">Test Health Endpoint</a></p>
+        <p><a href="/api/v1/market-data" target="_blank">Test Market Data</a></p>
+        <p><a href="/docs" target="_blank">View API Documentation</a></p>
+    </body>
+    </html>
+    """.format(timestamp=datetime.now().isoformat())
+    
+    return html_content
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return JSONResponse(content={
         "status": "healthy",
+        "message": "Aria XT Quant Pulse API is running",
         "system_status": system_status,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0"
     })
 
 # Include API router with prefix
 app.include_router(router, prefix="/api/v1")
 
 if __name__ == "__main__":
-    print("Starting Aria XT Quant Pulse Backend...")
-    print("API will be available at: http://localhost:8000")
-    print("API documentation at: http://localhost:8000/docs")
+    print("=" * 60)
+    print("🚀 Starting Aria XT Quant Pulse Backend...")
+    print("📍 API will be available at: http://localhost:8000")
+    print("📚 API documentation at: http://localhost:8000/docs")
+    print("🏥 Health check at: http://localhost:8000/health")
+    print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

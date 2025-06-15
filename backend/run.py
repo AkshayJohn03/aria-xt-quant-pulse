@@ -37,14 +37,17 @@ def main():
         logger.error("app.py not found. Please run this script from the backend directory.")
         sys.exit(1)
     
-    # Install requirements
+    # Install requirements first
     if not install_requirements():
         logger.error("Failed to install requirements. Exiting.")
         sys.exit(1)
     
     # Start the application
     try:
-        logger.info("Starting FastAPI application...")
+        logger.info("Starting FastAPI application on http://localhost:8000...")
+        logger.info("API documentation will be available at: http://localhost:8000/docs")
+        logger.info("Health check available at: http://localhost:8000/health")
+        
         from app import app
         import uvicorn
         uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
