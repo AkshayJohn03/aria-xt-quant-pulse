@@ -12,6 +12,7 @@ interface ConnectionStatus {
   models: boolean;
   ollama: boolean;
   gemini: boolean;
+  twelve_data: boolean;
   timestamp: string;
 }
 
@@ -24,25 +25,24 @@ export const useConnectionStatus = () => {
     try {
       console.log('Fetching connection status...');
       const response = await axios.get('http://localhost:8000/api/v1/connection-status', {
-        timeout: 10000 // 10 second timeout
+        timeout: 10000
       });
       
       console.log('Connection status response:', response.data);
       
       if (response.data.success) {
+        // The backend returns the status directly in data
         setStatus(response.data.data);
         setError(null);
       } else {
         const errorMsg = response.data.error || 'Failed to fetch connection status';
         setError(errorMsg);
         console.error('Connection status fetch failed:', errorMsg);
-        setStatus(null);
       }
     } catch (err: any) {
       const errorMsg = err.response?.data?.error || err.message || 'Network error - is backend running?';
       setError(errorMsg);
       console.error('Connection status fetch error:', err);
-      setStatus(null);
     } finally {
       setLoading(false);
     }
@@ -50,7 +50,7 @@ export const useConnectionStatus = () => {
 
   useEffect(() => {
     fetchStatus();
-    // Poll every 30 seconds instead of 5 seconds
+    // Poll every 30 seconds
     const interval = setInterval(fetchStatus, 30000);
     return () => clearInterval(interval);
   }, []);

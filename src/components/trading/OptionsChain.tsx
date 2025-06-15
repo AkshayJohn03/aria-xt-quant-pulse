@@ -1,55 +1,97 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowUp, ArrowDown, Filter, Download, RefreshCw } from 'lucide-react';
-import { OptionChainData, DataFetcher } from '@/lib/api/dataFetcher';
+import { ArrowUp, ArrowDown, Filter, Download, RefreshCw, DollarSign } from 'lucide-react';
+import axios from 'axios';
+
+interface OptionData {
+  strike: number;
+  expiry: string;
+  call: {
+    ltp: number;
+    volume: number;
+    oi: number;
+    iv: number;
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+    total_cost?: number;
+    affordable?: boolean;
+  };
+  put: {
+    ltp: number;
+    volume: number;
+    oi: number;
+    iv: number;
+    delta: number;
+    gamma: number;
+    theta: number;
+    vega: number;
+    total_cost?: number;
+    affordable?: boolean;
+  };
+}
+
+interface OptionChainResponse {
+  symbol: string;
+  underlying_value: number;
+  expiry_dates: string[];
+  option_chain: OptionData[];
+  available_funds?: number;
+  source: string;
+  timestamp: string;
+}
 
 const OptionsChain = () => {
-  const [optionData, setOptionData] = useState<OptionChainData[]>([]);
+  const [optionData, setOptionData] = useState<OptionData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [spotPrice, setSpotPrice] = useState<number | null>(null);
   const [expiries, setExpiries] = useState<string[]>([]);
   const [selectedExpiry, setSelectedExpiry] = useState<string>('');
   const [filterStrike, setFilterStrike] = useState('');
+  const [availableFunds, setAvailableFunds] = useState<number>(0);
+  const [showAffordableOnly, setShowAffordableOnly] = useState(false);
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const url = selectedExpiry
+        ? `http://localhost:8000/api/v1/option-chain?symbol=NIFTY&expiry=${encodeURIComponent(selectedExpiry)}`
+        : 'http://localhost:8000/api/v1/option-chain?symbol=NIFTY';
+      
+      console.log('Fetching option chain from:', url);
+      const response = await axios.get(url, { timeout: 30000 });
+      
+      if (response.data.success && response.data.data) {
+        const data: OptionChainResponse = response.data.data;
+        setOptionData(data.option_chain || []);
+        setSpotPrice(data.underlying_value || null);
+        setExpiries(data.expiry_dates || []);
+        setAvailableFunds(data.available_funds || 0);
+        
+        if (!selectedExpiry && data.expiry_dates && data.expiry_dates.length > 0) {
+          setSelectedExpiry(data.expiry_dates[0]);
+        }
+        
+        setError(null);
+      } else {
+        setError(response.data.error || 'Failed to fetch option chain data');
+      }
+    } catch (err: any) {
+      console.error('Option chain fetch error:', err);
+      setError(err.response?.data?.error || err.message || 'Failed to fetch option chain data');
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const fetcher = new DataFetcher();
-        // Fetch option chain for selected expiry
-        const url = selectedExpiry
-          ? `/option-chain?symbol=NIFTY&expiry=${encodeURIComponent(selectedExpiry)}`
-          : '/option-chain?symbol=NIFTY';
-        const response = await fetcher.fetchOptionChain(url);
-        if (response && Array.isArray(response)) {
-          setOptionData(response);
-          setError(null);
-          // Extract expiries from data if available
-          const expirySet = new Set(response.map(opt => opt.expiry));
-          setExpiries(Array.from(expirySet));
-          if (!selectedExpiry && expirySet.size > 0) {
-            setSelectedExpiry(Array.from(expirySet)[0]);
-          }
-          // Set spot price if available
-          if (response.length > 0 && response[0].call && typeof response[0].call.ltp === 'number') {
-            setSpotPrice(response[0].call.ltp);
-          }
-        } else {
-          setOptionData([]);
-          setError('Failed to fetch option chain data from backend.');
-        }
-      } catch (err: any) {
-        setOptionData([]);
-        setError(err.message || 'Failed to fetch option chain data from backend.');
-      }
-      setLoading(false);
-    };
     fetchData();
   }, [selectedExpiry]);
 
@@ -67,15 +109,19 @@ const OptionsChain = () => {
     return num.toFixed(2);
   };
 
-  const filteredData = optionData.filter(option => 
-    filterStrike === '' || option.strike.toString().includes(filterStrike)
-  );
-
   const getMoneyness = (strike: number): string => {
+    if (!spotPrice) return 'Unknown';
     const diff = Math.abs(strike - spotPrice);
     if (diff <= 50) return 'ATM';
     return strike < spotPrice ? 'ITM' : 'OTM';
   };
+
+  const filteredData = optionData.filter(option => {
+    const strikeMatch = filterStrike === '' || option.strike.toString().includes(filterStrike);
+    const affordableMatch = !showAffordableOnly || 
+      (option.call.affordable || option.put.affordable);
+    return strikeMatch && affordableMatch;
+  });
 
   if (loading) {
     return (
@@ -83,7 +129,7 @@ const OptionsChain = () => {
         <CardContent className="p-6">
           <div className="flex items-center justify-center h-64">
             <RefreshCw className="h-8 w-8 animate-spin text-blue-400" />
-            <span className="ml-2 text-slate-300">Loading option chain...</span>
+            <span className="ml-2 text-slate-300">Loading option chain from NSE...</span>
           </div>
         </CardContent>
       </Card>
@@ -98,8 +144,9 @@ const OptionsChain = () => {
             <CardTitle className="text-xl text-white mb-2">NIFTY50 Options Chain</CardTitle>
             <div className="flex items-center gap-4 text-sm text-slate-300">
               <span>Spot: ₹{spotPrice?.toLocaleString()}</span>
+              <span>Available Funds: ₹{formatNumber(availableFunds)}</span>
               <Badge variant="outline" className="border-green-500 text-green-400">
-                Live
+                NSE Live
               </Badge>
             </div>
           </div>
@@ -114,7 +161,17 @@ const OptionsChain = () => {
                 className="w-32 bg-slate-800 border-slate-600 text-white"
               />
             </div>
-            {/* Expiry Dropdown */}
+            
+            <Button
+              size="sm"
+              variant={showAffordableOnly ? "default" : "outline"}
+              onClick={() => setShowAffordableOnly(!showAffordableOnly)}
+              className="border-slate-600 text-slate-300"
+            >
+              <DollarSign className="h-4 w-4 mr-1" />
+              Affordable Only
+            </Button>
+            
             {expiries.length > 0 && (
               <select
                 value={selectedExpiry}
@@ -126,15 +183,22 @@ const OptionsChain = () => {
                 ))}
               </select>
             )}
-            <Button size="sm" variant="outline" className="border-slate-600 text-slate-300">
-              <Download className="h-4 w-4 mr-1" />
-              Export
+            
+            <Button onClick={fetchData} size="sm" variant="outline" className="border-slate-600 text-slate-300">
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Refresh
             </Button>
           </div>
         </div>
       </CardHeader>
 
       <CardContent>
+        {error && (
+          <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded">
+            <p className="text-red-400 text-sm">{error}</p>
+          </div>
+        )}
+
         <Tabs defaultValue="chain" className="w-full">
           <TabsList className="grid w-full grid-cols-3 bg-slate-800">
             <TabsTrigger value="chain" className="data-[state=active]:bg-slate-700">Chain</TabsTrigger>
@@ -159,7 +223,12 @@ const OptionsChain = () => {
                       <td className="p-2">
                         <div className="grid grid-cols-4 gap-2 text-xs">
                           <div>
-                            <div className="text-white font-medium">₹{option.call.ltp}</div>
+                            <div className={`font-medium ${option.call.affordable ? 'text-green-400' : 'text-white'}`}>
+                              ₹{option.call.ltp}
+                            </div>
+                            {option.call.total_cost && (
+                              <div className="text-slate-500">₹{formatNumber(option.call.total_cost)}</div>
+                            )}
                           </div>
                           <div>
                             <div className="text-slate-300">{formatNumber(option.call.volume)}</div>
@@ -170,7 +239,7 @@ const OptionsChain = () => {
                             <div className="text-slate-500">OI</div>
                           </div>
                           <div>
-                            <div className="text-slate-300">{option.call.iv.toFixed(1)}%</div>
+                            <div className="text-slate-300">{option.call.iv?.toFixed(1) || 0}%</div>
                             <div className="text-slate-500">IV</div>
                           </div>
                         </div>
@@ -195,7 +264,12 @@ const OptionsChain = () => {
                       <td className="p-2">
                         <div className="grid grid-cols-4 gap-2 text-xs">
                           <div>
-                            <div className="text-white font-medium">₹{option.put.ltp}</div>
+                            <div className={`font-medium ${option.put.affordable ? 'text-green-400' : 'text-white'}`}>
+                              ₹{option.put.ltp}
+                            </div>
+                            {option.put.total_cost && (
+                              <div className="text-slate-500">₹{formatNumber(option.put.total_cost)}</div>
+                            )}
                           </div>
                           <div>
                             <div className="text-slate-300">{formatNumber(option.put.volume)}</div>
@@ -206,7 +280,7 @@ const OptionsChain = () => {
                             <div className="text-slate-500">OI</div>
                           </div>
                           <div>
-                            <div className="text-slate-300">{option.put.iv.toFixed(1)}%</div>
+                            <div className="text-slate-300">{option.put.iv?.toFixed(1) || 0}%</div>
                             <div className="text-slate-500">IV</div>
                           </div>
                         </div>

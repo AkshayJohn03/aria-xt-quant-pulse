@@ -1,60 +1,21 @@
-# Project Dependencies for Aria-xT Quant Pulse Backend (Python 3.11.x Compatible)
 
-# Web Framework (FastAPI)
-fastapi==0.111.0
-uvicorn[standard]==0.30.1
-pydantic==2.7.1
-python-dotenv==1.0.1
-python-multipart==0.0.9 # For handling form data (e.g., file uploads)
-
-# Data Processing & Analysis
-pandas==2.2.2
-numpy==1.26.4
-scipy==1.13.0
-
-# Machine Learning & AI Models
-# Note: For PyTorch (torch), this specifies the CPU-only version.
-# If you have an NVIDIA GPU and CUDA installed, follow the instructions on
-# the PyTorch website (https://pytorch.org/get-started/locally/) to install
-# the GPU-enabled version AFTER running `pip install -r requirements.txt`.
-# Example for CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-torch==2.3.0
-scikit-learn==1.4.2
-joblib==1.4.2
-xgboost==2.0.2
-prophet==1.1.5 # Note: Prophet depends on pystan, which can sometimes be tricky to install.
-              # If you encounter issues, refer to Prophet's installation guide.
-
-# Technical Analysis
-# IMPORTANT: TA-Lib can be challenging to install directly via pip on Windows.
-# If `pip install TA-Lib` fails, you will likely need to:
-# 1. Manually download the pre-compiled .whl file for Python 3.11 (cp311)
-#    from Christoph Gohlke's website: https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib
-#    Look for something like: `TA_Lib‑0.4.28‑cp311‑cp311‑win_amd64.whl`
-# 2. Save it to your project root (e.g., D:\aria\aria-xt-quant-pulse\)
-# 3. Then, install it using:
-#    pip install "D:\aria\aria-xt-quant-pulse\TA_Lib‑0.4.28‑cp311‑cp311‑win_amd64.whl"
-#TA-Lib==0.4.28
-
-# API Clients & HTTP Requests
-requests==2.32.3
-httpx==0.27.0
-aiohttp==3.9.5
-
-# Telegram Integration
-python-telegram-bot==21.0 # Compatible with Python 3.10+
-
-# Google Generative AI (Gemini)
-google-generativeai==0.7.0
-
-# Ollama (Qwen2.5 client)
-ollama==0.1.8 # Or check Ollama's official documentation for the latest client version
-
-# Web Scraping Utilities
-beautifulsoup4==4.12.3
-
-# Broker Integration
-kiteconnect==5.0.1
-
-# Configuration & Logging
-pyyaml==6.0.1
+fastapi==0.104.1
+uvicorn==0.24.0
+python-dotenv==1.0.0
+pydantic==2.5.0
+requests==2.31.0
+kiteconnect==4.0.0
+yfinance==0.2.28
+pandas==2.1.4
+numpy==1.26.2
+scipy==1.11.4
+scikit-learn==1.3.2
+tensorflow==2.15.0
+torch==2.1.2
+transformers==4.36.2
+google-generativeai==0.3.2
+python-telegram-bot==20.7
+pytz==2023.3
+aiohttp==3.9.1
+beautifulsoup4==4.12.2
+lxml==4.9.3

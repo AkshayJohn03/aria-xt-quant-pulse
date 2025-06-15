@@ -396,10 +396,66 @@ async def send_notification(message: Dict[str, Any]):
 async def get_option_chain(symbol: str = "NIFTY", expiry: Optional[str] = None):
     """Get real option chain data for a symbol and expiry"""
     try:
+        # Try NSE scraping first
+        scraper = NSEOptionChainScraper()
+        try:
+            nse_data = await scraper.fetch_option_chain(symbol)
+            if nse_data and nse_data.get('option_chain'):
+                option_chain = nse_data['option_chain']
+                
+                # Filter by expiry if specified
+                if expiry:
+                    option_chain = [opt for opt in option_chain if opt['expiry'] == expiry]
+                
+                # Get available funds for budget filtering
+                try:
+                    if instances.risk_manager:
+                        funds = instances.risk_manager.get_funds()
+                        available_funds = funds.get('available_balance', 100000)  # Default 1L
+                    else:
+                        available_funds = 100000
+                    
+                    # Filter by budget
+                    affordable_options = scraper.filter_by_budget(option_chain, available_funds)
+                    
+                    result = {
+                        'symbol': symbol,
+                        'underlying_value': nse_data.get('underlying_value', 0),
+                        'expiry_dates': nse_data.get('expiry_dates', []),
+                        'option_chain': affordable_options,
+                        'available_funds': available_funds,
+                        'source': 'nse_live',
+                        'timestamp': nse_data.get('timestamp')
+                    }
+                    
+                    await scraper.close_session()
+                    return create_api_response(True, result)
+                    
+                except Exception as budget_error:
+                    logger.warning(f"Budget filtering failed: {budget_error}")
+                    # Return without budget filtering
+                    result = {
+                        'symbol': symbol,
+                        'underlying_value': nse_data.get('underlying_value', 0),
+                        'expiry_dates': nse_data.get('expiry_dates', []),
+                        'option_chain': option_chain,
+                        'source': 'nse_live',
+                        'timestamp': nse_data.get('timestamp')
+                    }
+                    await scraper.close_session()
+                    return create_api_response(True, result)
+                    
+        except Exception as nse_error:
+            logger.error(f"NSE scraping failed: {nse_error}")
+            await scraper.close_session()
+        
+        # Fallback to existing data fetcher
         if not instances.data_fetcher:
             return create_api_response(False, error="Data fetcher not initialized", status_code=503)
+        
         chain = await instances.data_fetcher.fetch_option_chain(symbol, expiry)
         return create_api_response(True, chain)
+        
     except Exception as e:
         logger.error(f"Error fetching option chain: {e}")
         return create_api_response(False, error=str(e), status_code=500)

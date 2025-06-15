@@ -2,27 +2,20 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
+interface MarketDataPoint {
+  value: number;
+  change: number;
+  percentChange: number;
+  high: number;
+  low: number;
+  volume: number;
+  timestamp: string | null;
+  source: string;
+}
+
 interface MarketData {
-  nifty50: {
-    value: number;
-    change: number;
-    percentChange: number;
-    high: number;
-    low: number;
-    volume: number;
-    timestamp: string | null;
-    source: string;
-  };
-  banknifty: {
-    value: number;
-    change: number;
-    percentChange: number;
-    high: number;
-    low: number;
-    volume: number;
-    timestamp: string | null;
-    source: string;
-  };
+  nifty50: MarketDataPoint;
+  banknifty: MarketDataPoint;
 }
 
 export const useMarketData = () => {
@@ -35,7 +28,7 @@ export const useMarketData = () => {
     try {
       console.log('Fetching market data from backend...');
       const response = await axios.get('http://localhost:8000/api/v1/market-data', {
-        timeout: 15000 // 15 second timeout for market data
+        timeout: 15000
       });
       
       console.log('Market data response:', response.data);
@@ -47,13 +40,12 @@ export const useMarketData = () => {
         const errorMsg = response.data.error || 'Failed to fetch market data';
         setError(errorMsg);
         console.error('Market data fetch failed:', errorMsg);
-        setMarketData(null);
       }
     } catch (err: any) {
       const errorMsg = err.response?.data?.error || err.message || 'Network error - is backend running?';
       setError(errorMsg);
       console.error('Market data fetch error:', err);
-      setMarketData(null);
+      // Don't clear existing data on error, just show the error
     } finally {
       setLoading(false);
     }
@@ -78,7 +70,7 @@ export const useMarketData = () => {
 
     // Poll every 30 seconds for market data
     const dataInterval = setInterval(fetchMarketData, 30000);
-    const statusInterval = setInterval(fetchMarketStatus, 60000); // Check market status every minute
+    const statusInterval = setInterval(fetchMarketStatus, 60000);
 
     return () => {
       clearInterval(dataInterval);

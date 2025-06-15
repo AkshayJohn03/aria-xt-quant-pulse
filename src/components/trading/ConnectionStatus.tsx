@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,7 +15,7 @@ import {
   RefreshCw,
   Brain
 } from 'lucide-react';
-import { useConnectionStatus } from '@/hooks/useAriaAPI';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
 const ConnectionStatus = () => {
   const { status, loading, error, refetch } = useConnectionStatus();
@@ -62,11 +63,6 @@ const ConnectionStatus = () => {
     );
   }
 
-  const connections = status?.connections || {};
-  const brokerConnected = status?.broker_connected || false;
-  const systemStatus = status?.system_status || {};
-  const modelStatus = status?.model_status || {};
-
   const getStatusBadge = (isConnected: boolean) => {
     return (
       <Badge 
@@ -90,31 +86,30 @@ const ConnectionStatus = () => {
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Broker Connection */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <TrendingUp className="h-4 w-4 text-blue-400" />
-            <span className="text-sm text-slate-300">Zerodha Broker</span>
-          </div>
-          {getStatusBadge(brokerConnected)}
-        </div>
-
         {/* API Connections */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <Database className="h-4 w-4 text-purple-400" />
-              <span className="text-sm text-slate-300">Kite API</span>
+              <TrendingUp className="h-4 w-4 text-blue-400" />
+              <span className="text-sm text-slate-300">Zerodha</span>
             </div>
-            {getStatusBadge(connections.zerodha)}
+            {getStatusBadge(status?.zerodha || false)}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Database className="h-4 w-4 text-purple-400" />
+              <span className="text-sm text-slate-300">Market Data</span>
+            </div>
+            {getStatusBadge(status?.market_data || false)}
           </div>
 
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <Database className="h-4 w-4 text-blue-400" />
-              <span className="text-sm text-slate-300">Market Data</span>
+              <span className="text-sm text-slate-300">Twelve Data</span>
             </div>
-            {getStatusBadge(connections.twelve_data)}
+            {getStatusBadge(status?.twelve_data || false)}
           </div>
 
           <div className="flex items-center justify-between">
@@ -122,7 +117,7 @@ const ConnectionStatus = () => {
               <Bot className="h-4 w-4 text-green-400" />
               <span className="text-sm text-slate-300">Gemini AI</span>
             </div>
-            {getStatusBadge(connections.gemini)}
+            {getStatusBadge(status?.gemini || false)}
           </div>
 
           <div className="flex items-center justify-between">
@@ -130,7 +125,7 @@ const ConnectionStatus = () => {
               <Brain className="h-4 w-4 text-orange-400" />
               <span className="text-sm text-slate-300">Ollama</span>
             </div>
-            {getStatusBadge(connections.ollama)}
+            {getStatusBadge(status?.ollama || false)}
           </div>
 
           <div className="flex items-center justify-between">
@@ -138,32 +133,14 @@ const ConnectionStatus = () => {
               <MessageSquare className="h-4 w-4 text-cyan-400" />
               <span className="text-sm text-slate-300">Telegram</span>
             </div>
-            {getStatusBadge(connections.telegram)}
-          </div>
-        </div>
-
-        {/* System Summary */}
-        <div className="border-t border-slate-700 pt-3 mt-4">
-          <div className="flex justify-between text-xs text-slate-400 mb-2">
-            <span>Trading Engine:</span>
-            <span className={systemStatus.is_running ? 'text-green-400' : 'text-red-400'}>
-              {systemStatus.is_running ? 'Running' : 'Stopped'}
-            </span>
-          </div>
-          <div className="flex justify-between text-xs text-slate-400 mb-2">
-            <span>Active Trades:</span>
-            <span className="text-white">{systemStatus.active_trades || 0}</span>
-          </div>
-          <div className="flex justify-between text-xs text-slate-400">
-            <span>System Health:</span>
-            <span className="text-green-400">{systemStatus.system_health || 'OK'}</span>
+            {getStatusBadge(status?.telegram || false)}
           </div>
         </div>
 
         {/* Last Update */}
-        {status?.last_update && (
+        {status?.timestamp && (
           <div className="text-xs text-slate-500 text-center pt-2 border-t border-slate-700">
-            Last update: {new Date(status.last_update).toLocaleString('en-IN')}
+            Last update: {new Date(status.timestamp).toLocaleString('en-IN')}
           </div>
         )}
       </CardContent>
