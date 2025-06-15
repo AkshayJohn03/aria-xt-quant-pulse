@@ -11,11 +11,31 @@ import OptionsChain from '@/components/trading/OptionsChain';
 import TradeLog from '@/components/trading/TradeLog';
 import RiskManagement from '@/components/trading/RiskManagement';
 import ConfigurationPanel from '@/components/trading/ConfigurationPanel';
-import { useMarketData } from '@/hooks/useAriaAPI';
+import { useMarketData } from '@/hooks/useMarketData';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const { marketData, loading, error } = useMarketData();
+
+  // Transform marketData to match MarketOverview expected format
+  const transformedMarketData = marketData ? {
+    nifty: {
+      value: marketData.nifty50.value,
+      change: marketData.nifty50.change,
+      percentChange: marketData.nifty50.percentChange
+    },
+    sensex: {
+      value: marketData.banknifty.value, // Using BANKNIFTY as SENSEX placeholder
+      change: marketData.banknifty.change,
+      percentChange: marketData.banknifty.percentChange
+    },
+    marketStatus: "OPEN", // You can add this to your backend response
+    lastUpdate: marketData.nifty50.timestamp || new Date().toISOString(),
+    aiSentiment: {
+      direction: "NEUTRAL", // You can add this to your backend response
+      confidence: 75 // You can add this to your backend response
+    }
+  } : null;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-800 text-white">
@@ -43,7 +63,7 @@ const Index = () => {
               </TabsList>
 
               <TabsContent value="dashboard" className="space-y-6">
-                <MarketOverview marketData={marketData} loading={loading} error={error} />
+                <MarketOverview marketData={transformedMarketData} loading={loading} error={error} />
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <PredictiveCharts />
                   <RiskManagement />

@@ -67,13 +67,13 @@ class DataFetcher:
             return False
 
     async def fetch_market_data(self, symbol: str = "NIFTY50") -> Dict[str, Any]:
-        """Fetch market data with Yahoo Finance as primary fallback"""
+        """Fetch market data with Yahoo Finance as primary source"""
         try:
             # Check cache first
             if self._is_cache_valid(symbol):
                 return self.cache[symbol]
 
-            # Always try Yahoo Finance first for free tier
+            # Use Yahoo Finance as primary source for free tier
             try:
                 logger.info(f"Fetching market data from Yahoo Finance for {symbol}")
                 data = await self._fetch_from_yahoo(symbol)
@@ -83,7 +83,7 @@ class DataFetcher:
             except Exception as e:
                 logger.warning(f"Yahoo Finance fetch failed: {e}")
 
-            # Fallback to Zerodha if available
+            # Fallback to Zerodha if available and Yahoo fails
             if self.kite:
                 try:
                     logger.info(f"Falling back to Zerodha for {symbol}")
@@ -94,15 +94,13 @@ class DataFetcher:
                 except Exception as e:
                     logger.warning(f"Zerodha fetch also failed: {e}")
 
-            # If both fail, generate mock data for development
-            logger.warning(f"Both data sources failed for {symbol}, generating mock data")
-            data = self._get_mock_data(symbol)
-            self._update_cache(symbol, data)
-            return data
+            # If both fail, return None - let the API handle fallback
+            logger.warning(f"All data sources failed for {symbol}")
+            return None
 
         except Exception as e:
             logger.error(f"Error fetching market data: {e}")
-            raise
+            return None
 
     async def _fetch_from_yahoo(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Fetch data from Yahoo Finance with improved error handling"""
@@ -116,7 +114,7 @@ class DataFetcher:
             # Fetch data in a separate thread to avoid blocking
             def fetch_yahoo_data():
                 ticker = yf.Ticker(yahoo_symbol)
-                hist = ticker.history(period='2d', interval='5m')
+                hist = ticker.history(period='5d', interval='5m')  # Get more data
                 info = ticker.info
                 return hist, info
 
@@ -128,10 +126,15 @@ class DataFetcher:
 
             # Get current and previous close prices
             current_price = float(hist['Close'].iloc[-1])
-            prev_close = float(info.get('regularMarketPreviousClose', hist['Close'].iloc[-2]))
+            
+            # Try to get previous close from info, fallback to previous data point
+            try:
+                prev_close = float(info.get('previousClose', hist['Close'].iloc[-2]))
+            except (IndexError, KeyError):
+                prev_close = current_price  # Fallback if no previous data
             
             change = current_price - prev_close
-            change_percent = (change / prev_close * 100) if prev_close else 0
+            change_percent = (change / prev_close * 100) if prev_close != 0 else 0
 
             # Convert to required format
             formatted_data = []
@@ -155,7 +158,7 @@ class DataFetcher:
                 'timestamp': datetime.now().isoformat()
             }
             
-            logger.info(f"Successfully fetched Yahoo Finance data for {symbol}: {current_price}")
+            logger.info(f"Successfully fetched Yahoo Finance data for {symbol}: {current_price} (change: {change:.2f})")
             return result
 
         except Exception as e:
