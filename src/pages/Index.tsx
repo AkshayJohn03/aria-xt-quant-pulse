@@ -20,9 +20,9 @@ const Index = () => {
   // Transform marketData to match MarketOverview expected format
   const transformedMarketData = marketData ? {
     nifty: {
-      value: marketData.nifty50.value,
-      change: marketData.nifty50.change,
-      percentChange: marketData.nifty50.percentChange
+      value: marketData.nifty.value,
+      change: marketData.nifty.change,
+      percentChange: marketData.nifty.percentChange
     },
     sensex: {
       value: marketData.banknifty.value, // Using BANKNIFTY as SENSEX placeholder
@@ -30,7 +30,7 @@ const Index = () => {
       percentChange: marketData.banknifty.percentChange
     },
     marketStatus: "OPEN", // You can add this to your backend response
-    lastUpdate: marketData.nifty50.timestamp || new Date().toISOString(),
+    lastUpdate: marketData.nifty.timestamp || new Date().toISOString(),
     aiSentiment: {
       direction: "NEUTRAL", // You can add this to your backend response
       confidence: 75 // You can add this to your backend response
