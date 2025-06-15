@@ -1,0 +1,27 @@
+flask>=3.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+twelvedata>=1.2.0
+plotly>=5.18.0
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+python-telegram-bot>=20.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
+python-dotenv>=1.0.0
+#black-scholes>=0.1.0
+onnxruntime>=1.16.0 
+# Add other model-specific dependencies as needed (e.g., torch, transformers, statsmodels for Prophet)
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+tqdm>=4.60.0
+onnxruntime>=1.16.0 # For ONNX inference
+# For Prophet:
+prophet>=1.1.0
+# For XGBoost:
+xgboost>=1.7.0
+# For Kalman Filter (if a specific library is used, otherwise numpy/scipy can suffice):
+# filterpy # Example, if a dedicated library is chosen
+# For Black-Scholes (if not custom):
+# py_vollib # Example, if a dedicated library is chosen

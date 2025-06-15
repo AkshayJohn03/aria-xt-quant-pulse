@@ -16,7 +16,7 @@ class SignalGenerator:
         self.model_interface = model_interface
         self.risk_manager = risk_manager
         
-        # Strategy parameters
+        # Advanced strategy parameters
         self.rsi_oversold = 30
         self.rsi_overbought = 70
         self.bb_squeeze_threshold = 0.02
@@ -24,18 +24,33 @@ class SignalGenerator:
         self.min_confluence_score = 0.65
         self.trend_strength_threshold = 0.6
         
-        logging.info("SignalGenerator initialized with Multi-Model Confluence Strategy.")
+        # Advanced strategy specific parameters
+        self.iv_percentile_threshold = 70  # For IV-based strategies
+        self.delta_range = (0.3, 0.7)  # For option selection
+        self.min_oi_threshold = 50000  # Minimum open interest
+        self.min_volume_threshold = 10000  # Minimum volume
+        self.theta_decay_threshold = -0.1  # Maximum acceptable theta decay
+        
+        # Strategy weights
+        self.strategy_weights = {
+            'technical': 0.3,
+            'ai_prediction': 0.3,
+            'market_context': 0.2,
+            'option_metrics': 0.2
+        }
+        
+        logging.info("SignalGenerator initialized with Advanced Multi-Strategy Framework.")
 
     async def generate_signals(self, market_data: Dict[str, Any], option_chain: List[Dict]) -> List[Dict[str, Any]]:
         """
-        Main signal generation method using Multi-Model Confluence Strategy
+        Main signal generation method using Advanced Multi-Strategy Framework
         """
         signals = []
         
         try:
             # Extract OHLCV data
             ohlcv_data = market_data.get('ohlcv_5min', [])
-            if len(ohlcv_data) < 50:  # Need sufficient history
+            if len(ohlcv_data) < 50:
                 logging.warning("Insufficient OHLCV data for signal generation")
                 return []
             
@@ -51,13 +66,13 @@ class SignalGenerator:
             # Analyze market context
             market_context = self._analyze_market_context(df, indicators)
             
-            # Generate confluence score
+            # Generate confluence score with advanced weighting
             confluence_analysis = self._calculate_confluence_score(
                 indicators, ai_predictions, market_context
             )
             
-            # Generate signals based on confluence
-            if confluence_analysis['score'] >= self.min_confluence_score:
+            # Apply advanced filtering
+            if self._validate_signal_conditions(confluence_analysis, market_context):
                 signal = self._create_trading_signal(
                     confluence_analysis, market_data, option_chain
                 )
@@ -352,7 +367,7 @@ class SignalGenerator:
                 'target': target,
                 'confidence': confidence * 100,
                 'reasoning': self._generate_reasoning(confluence),
-                'strategy': 'Multi-Model Confluence',
+                'strategy': 'Advanced Multi-Strategy',
                 'timestamp': datetime.now().isoformat(),
                 'option_type': suitable_option['type'],
                 'strike': suitable_option['strike'],
@@ -366,24 +381,23 @@ class SignalGenerator:
             return None
 
     def _find_optimal_option(self, option_chain: List, direction: str, confidence: float) -> Optional[Dict]:
-        """Find the most suitable option based on strategy"""
+        """Enhanced option selection with advanced metrics"""
         if not option_chain:
             return None
         
         is_call = direction == 'BULLISH'
         
-        # Filter options based on liquidity and moneyness
+        # Filter and score options
         suitable_options = []
         for option in option_chain:
             option_data = option.get('call' if is_call else 'put', {})
             
-            # Check liquidity
-            if option_data.get('volume', 0) < 10000 or option_data.get('oi', 0) < 50000:
+            # Advanced filtering
+            if not self._validate_option_metrics(option_data):
                 continue
             
-            # Check reasonable IV
-            if not (10 <= option_data.get('iv', 0) <= 40):
-                continue
+            # Calculate option score
+            score = self._calculate_option_score(option_data, direction, confidence)
             
             suitable_options.append({
                 'symbol': f"NIFTY {option['strike']} {'CE' if is_call else 'PE'}",
@@ -393,60 +407,149 @@ class SignalGenerator:
                 'volume': option_data.get('volume', 0),
                 'oi': option_data.get('oi', 0),
                 'delta': abs(option_data.get('delta', 0)),
+                'theta': option_data.get('theta', 0),
+                'vega': option_data.get('vega', 0),
                 'type': 'CE' if is_call else 'PE',
-                'expiry': option.get('expiry', '')
+                'expiry': option.get('expiry', ''),
+                'score': score
             })
         
         if not suitable_options:
             return None
         
-        # Select based on delta and liquidity
-        target_delta = 0.3 + (confidence * 0.4)  # Higher confidence -> higher delta
-        best_option = min(suitable_options, 
-                         key=lambda x: abs(x['delta'] - target_delta) + (1 / (x['volume'] + 1)))
-        
-        return best_option
+        # Select best option based on score
+        return max(suitable_options, key=lambda x: x['score'])
+
+    def _validate_option_metrics(self, option_data: Dict) -> bool:
+        """Validate option metrics against thresholds"""
+        try:
+            # Check liquidity
+            if option_data.get('volume', 0) < self.min_volume_threshold:
+                return False
+            if option_data.get('oi', 0) < self.min_oi_threshold:
+                return False
+            
+            # Check IV
+            iv = option_data.get('iv', 0)
+            if not (10 <= iv <= 40):
+                return False
+            
+            # Check theta decay
+            if option_data.get('theta', 0) < self.theta_decay_threshold:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error in option validation: {e}")
+            return False
+
+    def _calculate_option_score(self, option_data: Dict, direction: str, confidence: float) -> float:
+        """Calculate comprehensive option score"""
+        try:
+            score = 0.0
+            
+            # Delta score (0.3-0.7 range preferred)
+            delta = abs(option_data.get('delta', 0))
+            delta_score = 1 - abs(delta - 0.5) * 2
+            score += delta_score * 0.3
+            
+            # Liquidity score
+            volume_score = min(1, option_data.get('volume', 0) / (self.min_volume_threshold * 2))
+            oi_score = min(1, option_data.get('oi', 0) / (self.min_oi_threshold * 2))
+            score += (volume_score + oi_score) * 0.2
+            
+            # IV score (lower IV preferred)
+            iv = option_data.get('iv', 0)
+            iv_score = 1 - (iv - 10) / 30  # Normalize IV between 10-40
+            score += iv_score * 0.2
+            
+            # Theta score (less negative theta preferred)
+            theta = option_data.get('theta', 0)
+            theta_score = 1 - abs(theta) / 0.5  # Normalize theta
+            score += theta_score * 0.2
+            
+            # Vega score (lower vega preferred for shorter-term trades)
+            vega = option_data.get('vega', 0)
+            vega_score = 1 - min(1, vega / 0.5)
+            score += vega_score * 0.1
+            
+            return score
+            
+        except Exception as e:
+            logging.error(f"Error calculating option score: {e}")
+            return 0.0
 
     def _calculate_position_size(self, option: Dict, confidence: float) -> int:
-        """Calculate optimal position size"""
-        capital = self.strategy_params.get('capital_allocation', 100000)
-        max_risk_per_trade = self.strategy_params.get('max_risk_per_trade', 2.5) / 100
-        
-        # Adjust risk based on confidence
-        adjusted_risk = max_risk_per_trade * (0.5 + confidence * 0.5)
-        
-        # Calculate max affordable quantity
-        max_risk_amount = capital * adjusted_risk
-        option_price = option['ltp']
-        
-        if option_price <= 0:
+        """Enhanced position sizing with risk management"""
+        try:
+            capital = self.strategy_params.get('capital_allocation', 100000)
+            max_risk_per_trade = self.strategy_params.get('max_risk_per_trade', 2.5) / 100
+            
+            # Adjust risk based on confidence and option metrics
+            base_risk = max_risk_per_trade * (0.5 + confidence * 0.5)
+            
+            # Adjust for IV
+            iv = option.get('iv', 20) / 100
+            iv_adjustment = 1 - (iv - 0.2) * 2  # Reduce size for high IV
+            adjusted_risk = base_risk * max(0.5, iv_adjustment)
+            
+            # Calculate max affordable quantity
+            max_risk_amount = capital * adjusted_risk
+            option_price = option['ltp']
+            
+            if option_price <= 0:
+                return 0
+            
+            max_quantity = int(max_risk_amount / option_price)
+            
+            # Minimum viable quantity
+            min_quantity = max(1, int(10000 / option_price))
+            
+            # Apply position limits
+            return max(min_quantity, min(max_quantity, 1000))
+            
+        except Exception as e:
+            logging.error(f"Error in position sizing: {e}")
             return 0
-        
-        max_quantity = int(max_risk_amount / option_price)
-        
-        # Minimum viable quantity
-        min_quantity = max(1, int(10000 / option_price))
-        
-        return max(min_quantity, min(max_quantity, 1000))  # Cap at 1000 lots
 
     def _calculate_sl_target(self, option: Dict, direction: str, confluence: Dict) -> Tuple[float, float]:
-        """Calculate stop loss and target prices"""
-        entry_price = option['ltp']
-        confidence = confluence['score']
-        
-        # Dynamic stop loss based on IV and confidence
-        iv = option.get('iv', 20) / 100
-        stop_loss_pct = 0.2 + (iv * 0.5) - (confidence * 0.1)  # 20-70% range
-        stop_loss_pct = max(0.15, min(0.7, stop_loss_pct))
-        
-        # Target based on risk-reward ratio
-        risk_reward_ratio = 1.5 + (confidence * 1.0)  # 1.5:1 to 2.5:1
-        target_pct = stop_loss_pct * risk_reward_ratio
-        
-        stop_loss = entry_price * (1 - stop_loss_pct)
-        target = entry_price * (1 + target_pct)
-        
-        return round(stop_loss, 2), round(target, 2)
+        """Enhanced stop loss and target calculation"""
+        try:
+            entry_price = option['ltp']
+            confidence = confluence['score']
+            
+            # Dynamic stop loss based on IV, ATR, and confidence
+            iv = option.get('iv', 20) / 100
+            atr = confluence.get('market_context', {}).get('atr', 0)
+            
+            # Base stop loss percentage
+            base_sl_pct = 0.2 + (iv * 0.5) - (confidence * 0.1)
+            
+            # Adjust for volatility
+            if atr > 0:
+                atr_adjustment = min(0.3, atr / entry_price)
+                base_sl_pct = max(base_sl_pct, atr_adjustment)
+            
+            # Final stop loss percentage
+            stop_loss_pct = max(0.15, min(0.7, base_sl_pct))
+            
+            # Dynamic risk-reward ratio based on confidence and market conditions
+            base_rr = 1.5 + (confidence * 1.0)
+            market_volatility = confluence.get('market_context', {}).get('volatility_score', 0.5)
+            adjusted_rr = base_rr * (1 + market_volatility)
+            
+            # Calculate target
+            target_pct = stop_loss_pct * adjusted_rr
+            
+            stop_loss = entry_price * (1 - stop_loss_pct)
+            target = entry_price * (1 + target_pct)
+            
+            return round(stop_loss, 2), round(target, 2)
+            
+        except Exception as e:
+            logging.error(f"Error calculating SL/Target: {e}")
+            return entry_price * 0.8, entry_price * 1.5  # Default values
 
     def _generate_reasoning(self, confluence: Dict) -> str:
         direction = confluence['direction']
@@ -483,3 +586,29 @@ class SignalGenerator:
             'finbert': {'sentiment': 'NEUTRAL', 'score': 0.5},
             'gemini': {'analysis': 'NEUTRAL|0.5|Default analysis'}
         }
+
+    def _validate_signal_conditions(self, confluence: Dict, market_context: Dict) -> bool:
+        """Advanced validation of signal conditions"""
+        try:
+            # Check trend strength
+            if market_context.get('trend_strength', 0) < self.trend_strength_threshold:
+                return False
+            
+            # Check volatility conditions
+            if market_context.get('bb_squeeze', False) and not market_context.get('volume_spike', False):
+                return False
+            
+            # Check market regime
+            if market_context.get('high_volatility', False) and confluence['score'] < 0.75:
+                return False
+            
+            # Check time-based conditions
+            current_hour = datetime.now().hour
+            if current_hour < 9 or current_hour > 15:  # Outside market hours
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error in signal validation: {e}")
+            return False

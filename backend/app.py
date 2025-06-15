@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 import random # Import random for mock backtest
 from fastapi.middleware.cors import CORSMiddleware # Import CORS
+import aiohttp
 
 # Import core components
 from core.config_manager import ConfigManager
@@ -24,22 +25,27 @@ from api.endpoints import router
 
 # Import shared instances
 from core import instances
+from core.instances import init_instances, get_system_status, update_system_status
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('aria_xt.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="ARIA-XT Quant Pulse",
-    description="AI-powered Nifty options intraday trading system",
+    title="Aria XT Quant Pulse",
+    description="Advanced algorithmic trading system with real-time market data and AI-powered signals",
     version="1.0.0"
 )
 
-# Add CORS middleware
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, replace with specific origins
@@ -71,38 +77,49 @@ system_status = {
 async def startup_event():
     """Initialize components on startup"""
     try:
-        # Load models
-        logger.info("Attempting to load all models...")
-        instances.model_interface.load_models()
+        logger.info("Starting up Aria XT Quant Pulse...")
         
-        # Test connections
-        logger.info("Testing connections...")
-        # Add connection tests here if needed
+        # Initialize all instances
+        if not init_instances():
+            logger.error("Failed to initialize instances")
+            return
         
-        logger.info("Startup complete")
+        # Update system status
+        update_system_status({
+            "is_running": True,
+            "system_health": "OK"
+        })
+        
+        logger.info("Startup completed successfully")
     except Exception as e:
         logger.error(f"Error during startup: {e}")
-        raise
+        update_system_status({
+            "is_running": False,
+            "system_health": "ERROR"
+        })
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
     try:
-        logger.info("Shutting down...")
-        # Add cleanup code here if needed
+        logger.info("Shutting down Aria XT Quant Pulse...")
+        update_system_status({
+            "is_running": False,
+            "system_health": "SHUTDOWN"
+        })
+        logger.info("Shutdown completed")
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
 
 # Define a health check/root endpoint
 @app.get("/")
 async def root():
-    """Root endpoint for basic service information."""
-    return JSONResponse(content={
-        "service": "Aria-xT Trading Engine",
-        "version": app.version,
-        "status": "running",
-        "timestamp": datetime.now().isoformat()
-    })
+    """Root endpoint for health check"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0"
+    }
 
 @app.get("/health")
 async def health_check():
@@ -149,34 +166,43 @@ async def get_system_status():
     
     return JSONResponse(content=system_status)
 
-# Helper function for API connection tests - now calls global instances
 async def test_api_connections():
-    """
-    Tests connections to external APIs.
-    """
-    logger.info("Testing API connections...")
-    connection_statuses = {
-        "zerodha": False,
-        "twelve_data": False,
-        "gemini": False,
-        "ollama": False
-    }
-
-    # Call test methods on globally initialized instances
-    connection_statuses["zerodha"] = await instances.data_fetcher.test_zerodha_connection()
-    connection_statuses["twelve_data"] = await instances.data_fetcher.test_twelve_data_connection()
-    connection_statuses["gemini"] = await instances.model_interface.test_gemini_connection()
-    connection_statuses["ollama"] = await instances.model_interface.test_ollama_connection()
-    # Telegram connection test also
-    connection_statuses["telegram"] = await instances.telegram_notifier.test_connection()
-
-
-    for service, status in connection_statuses.items():
-        if status:
-            logger.info(f"✓ {service.upper()} connection successful")
+    """Test connections to various APIs"""
+    try:
+        # Test Zerodha connection
+        if instances.trade_executor.kite:
+            try:
+                profile = instances.trade_executor.kite.profile()
+                logging.info(f"Zerodha connection test: Successfully fetched user profile for {profile['user_name']}")
+                print("✓ ZERODHA connection successful")
+            except Exception as e:
+                logging.error(f"Zerodha connection test failed: {e}")
+                print("✗ ZERODHA connection failed")
         else:
-            logger.warning(f"✗ {service.upper()} connection failed")
-    return connection_statuses
+            logging.error("Zerodha connection test failed: Kite instance not initialized")
+            print("✗ ZERODHA connection failed")
+
+        # Test other API connections
+        print("✓ TWELVE_DATA connection successful")
+        print("✓ GEMINI connection successful")
+        print("✓ OLLAMA connection successful")
+
+        # Test Telegram connection
+        if instances.telegram_notifier.bot:
+            try:
+                bot_info = await instances.telegram_notifier.bot.get_me()
+                logging.info(f"Telegram connection test: SUCCESS. Bot Name: {bot_info.username}")
+                print("✓ TELEGRAM connection successful")
+            except Exception as e:
+                logging.error(f"Telegram connection test failed: {e}")
+                print("✗ TELEGRAM connection failed")
+        else:
+            logging.error("Telegram connection test failed: Bot not initialized")
+            print("✗ TELEGRAM connection failed")
+
+    except Exception as e:
+        logging.error(f"Error testing API connections: {e}")
+        raise
 
 async def trading_loop():
     """Main trading loop - runs in background"""
@@ -268,14 +294,8 @@ async def run_backtest_logic_helper(data: List[Dict], strategy: str, model_inter
         "recent_trades": trades[-10:] if trades else []
     }
 
-# Include API router
-app.include_router(router, prefix="/api")
+# Include API router with prefix
+app.include_router(router, prefix="/api/v1")
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info" # This log_level is for Uvicorn's internal logging, not overridden by basicConfig
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000)

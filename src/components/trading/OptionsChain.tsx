@@ -5,193 +5,53 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ArrowUp, ArrowDown, Filter, Download, RefreshCw } from 'lucide-react';
-
-interface OptionData {
-  strike: number;
-  expiry: string;
-  call: {
-    ltp: number;
-    volume: number;
-    oi: number;
-    iv: number;
-    delta: number;
-    gamma: number;
-    theta: number;
-    vega: number;
-    change: number;
-    changePct: number;
-  };
-  put: {
-    ltp: number;
-    volume: number;
-    oi: number;
-    iv: number;
-    delta: number;
-    gamma: number;
-    theta: number;
-    vega: number;
-    change: number;
-    changePct: number;
-  };
-}
+import { OptionChainData, DataFetcher } from '@/lib/api/dataFetcher';
 
 const OptionsChain = () => {
-  const [optionData, setOptionData] = useState<OptionData[]>([]);
+  const [optionData, setOptionData] = useState<OptionChainData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [spotPrice] = useState(19850.25);
+  const [error, setError] = useState<string | null>(null);
+  const [spotPrice, setSpotPrice] = useState<number | null>(null);
+  const [expiries, setExpiries] = useState<string[]>([]);
+  const [selectedExpiry, setSelectedExpiry] = useState<string>('');
   const [filterStrike, setFilterStrike] = useState('');
-  const [selectedExpiry, setSelectedExpiry] = useState('2024-06-27');
 
-  // Mock data for demonstration
   useEffect(() => {
-    const mockData: OptionData[] = [
-      {
-        strike: 19700,
-        expiry: '2024-06-27',
-        call: {
-          ltp: 180.50,
-          volume: 125000,
-          oi: 450000,
-          iv: 18.5,
-          delta: 0.75,
-          gamma: 0.08,
-          theta: -2.5,
-          vega: 12.3,
-          change: 15.25,
-          changePct: 9.22
-        },
-        put: {
-          ltp: 35.75,
-          volume: 85000,
-          oi: 320000,
-          iv: 16.8,
-          delta: -0.25,
-          gamma: 0.08,
-          theta: -1.8,
-          vega: 11.5,
-          change: -8.50,
-          changePct: -19.20
+    const fetchData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const fetcher = new DataFetcher();
+        // Fetch option chain for selected expiry
+        const url = selectedExpiry
+          ? `/option-chain?symbol=NIFTY&expiry=${encodeURIComponent(selectedExpiry)}`
+          : '/option-chain?symbol=NIFTY';
+        const response = await fetcher.fetchOptionChain(url);
+        if (response && Array.isArray(response)) {
+          setOptionData(response);
+          setError(null);
+          // Extract expiries from data if available
+          const expirySet = new Set(response.map(opt => opt.expiry));
+          setExpiries(Array.from(expirySet));
+          if (!selectedExpiry && expirySet.size > 0) {
+            setSelectedExpiry(Array.from(expirySet)[0]);
+          }
+          // Set spot price if available
+          if (response.length > 0 && response[0].call && typeof response[0].call.ltp === 'number') {
+            setSpotPrice(response[0].call.ltp);
+          }
+        } else {
+          setOptionData([]);
+          setError('Failed to fetch option chain data from backend.');
         }
-      },
-      {
-        strike: 19750,
-        expiry: '2024-06-27',
-        call: {
-          ltp: 145.20,
-          volume: 140000,
-          oi: 480000,
-          iv: 17.8,
-          delta: 0.65,
-          gamma: 0.07,
-          theta: -2.2,
-          vega: 11.8,
-          change: 12.50,
-          changePct: 8.90
-        },
-        put: {
-          ltp: 42.30,
-          volume: 90000,
-          oi: 330000,
-          iv: 16.2,
-          delta: -0.30,
-          gamma: 0.07,
-          theta: -1.6,
-          vega: 11.0,
-          change: -7.80,
-          changePct: -17.50
-        }
-      },
-      {
-        strike: 19800,
-        expiry: '2024-06-27',
-        call: {
-          ltp: 112.80,
-          volume: 155000,
-          oi: 510000,
-          iv: 17.2,
-          delta: 0.55,
-          gamma: 0.06,
-          theta: -1.9,
-          vega: 11.2,
-          change: 9.80,
-          changePct: 8.65
-        },
-        put: {
-          ltp: 51.90,
-          volume: 95000,
-          oi: 340000,
-          iv: 15.7,
-          delta: -0.35,
-          gamma: 0.06,
-          theta: -1.4,
-          vega: 10.5,
-          change: -6.20,
-          changePct: -15.20
-        }
-      },
-      {
-        strike: 19850,
-        expiry: '2024-06-27',
-        call: {
-          ltp: 85.40,
-          volume: 170000,
-          oi: 540000,
-          iv: 16.7,
-          delta: 0.45,
-          gamma: 0.05,
-          theta: -1.6,
-          vega: 10.7,
-          change: 7.40,
-          changePct: 8.00
-        },
-        put: {
-          ltp: 63.50,
-          volume: 100000,
-          oi: 350000,
-          iv: 15.2,
-          delta: -0.40,
-          gamma: 0.05,
-          theta: -1.2,
-          vega: 10.0,
-          change: -5.50,
-          changePct: -13.80
-        }
-      },
-      {
-        strike: 19900,
-        expiry: '2024-06-27',
-        call: {
-          ltp: 62.10,
-          volume: 185000,
-          oi: 570000,
-          iv: 16.2,
-          delta: 0.35,
-          gamma: 0.04,
-          theta: -1.3,
-          vega: 10.2,
-          change: 5.10,
-          changePct: 7.50
-        },
-        put: {
-          ltp: 78.10,
-          volume: 105000,
-          oi: 360000,
-          iv: 14.7,
-          delta: -0.45,
-          gamma: 0.04,
-          theta: -1.0,
-          vega: 9.5,
-          change: -4.80,
-          changePct: -12.50
-        }
+      } catch (err: any) {
+        setOptionData([]);
+        setError(err.message || 'Failed to fetch option chain data from backend.');
       }
-    ];
-
-    setTimeout(() => {
-      setOptionData(mockData);
       setLoading(false);
-    }, 1000);
-  }, []);
+    };
+    fetchData();
+  }, [selectedExpiry]);
 
   const getChangeColor = (change: number): string => {
     return change >= 0 ? 'text-green-400' : 'text-red-400';
@@ -237,7 +97,7 @@ const OptionsChain = () => {
           <div>
             <CardTitle className="text-xl text-white mb-2">NIFTY50 Options Chain</CardTitle>
             <div className="flex items-center gap-4 text-sm text-slate-300">
-              <span>Spot: ₹{spotPrice.toLocaleString()}</span>
+              <span>Spot: ₹{spotPrice?.toLocaleString()}</span>
               <Badge variant="outline" className="border-green-500 text-green-400">
                 Live
               </Badge>
@@ -254,6 +114,18 @@ const OptionsChain = () => {
                 className="w-32 bg-slate-800 border-slate-600 text-white"
               />
             </div>
+            {/* Expiry Dropdown */}
+            {expiries.length > 0 && (
+              <select
+                value={selectedExpiry}
+                onChange={e => setSelectedExpiry(e.target.value)}
+                className="w-40 bg-slate-800 border-slate-600 text-white rounded px-2 py-1"
+              >
+                {expiries.map(exp => (
+                  <option key={exp} value={exp}>{exp}</option>
+                ))}
+              </select>
+            )}
             <Button size="sm" variant="outline" className="border-slate-600 text-slate-300">
               <Download className="h-4 w-4 mr-1" />
               Export
@@ -288,9 +160,6 @@ const OptionsChain = () => {
                         <div className="grid grid-cols-4 gap-2 text-xs">
                           <div>
                             <div className="text-white font-medium">₹{option.call.ltp}</div>
-                            <div className={getChangeColor(option.call.change)}>
-                              {option.call.change > 0 ? '+' : ''}{option.call.change.toFixed(2)}
-                            </div>
                           </div>
                           <div>
                             <div className="text-slate-300">{formatNumber(option.call.volume)}</div>
@@ -327,9 +196,6 @@ const OptionsChain = () => {
                         <div className="grid grid-cols-4 gap-2 text-xs">
                           <div>
                             <div className="text-white font-medium">₹{option.put.ltp}</div>
-                            <div className={getChangeColor(option.put.change)}>
-                              {option.put.change > 0 ? '+' : ''}{option.put.change.toFixed(2)}
-                            </div>
                           </div>
                           <div>
                             <div className="text-slate-300">{formatNumber(option.put.volume)}</div>

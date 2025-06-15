@@ -75,4 +75,4 @@ if __name__ == "__main__":
     except PermissionError:
         logger.info("Permission denied for port 80. Trying with sudo...")
         import subprocess
-        subprocess.run(['sudo', 'python3', __file__])
+        subprocess.run(['sudo', 'python3', __file__]) 

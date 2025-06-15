@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { ariaAPI } from '../lib/api/endpoints';
@@ -105,37 +104,6 @@ export function usePortfolio() {
   return { portfolio, loading, error };
 }
 
-// Yahoo Finance fallback function
-const fetchYahooFinanceData = async (): Promise<MarketData | null> => {
-  try {
-    // Mock Yahoo Finance data as fallback
-    const mockData: MarketData = {
-      nifty: {
-        value: 19800 + Math.random() * 400, // Random value around 19800-20200
-        change: (Math.random() - 0.5) * 200, // Random change between -100 to +100
-        percentChange: (Math.random() - 0.5) * 2, // Random % change between -1% to +1%
-      },
-      sensex: {
-        value: 66000 + Math.random() * 2000, // Random value around 66000-68000
-        change: (Math.random() - 0.5) * 500, // Random change between -250 to +250
-        percentChange: (Math.random() - 0.5) * 2, // Random % change between -1% to +1%
-      },
-      marketStatus: "OPEN",
-      lastUpdate: new Date().toISOString(),
-      aiSentiment: {
-        direction: Math.random() > 0.5 ? "BULLISH" : "BEARISH",
-        confidence: 60 + Math.random() * 30 // Random confidence between 60-90%
-      }
-    };
-    
-    console.log('Using Yahoo Finance fallback data');
-    return mockData;
-  } catch (error) {
-    console.error('Yahoo Finance fallback failed:', error);
-    return null;
-  }
-};
-
 export function useMarketData() {
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -145,39 +113,19 @@ export function useMarketData() {
     try {
       setLoading(true);
       setError(null);
-      
-      console.log('Fetching market data from backend...');
       const response = await axios.get(`${API_BASE_URL}/market-data`);
-      
-      console.log('Market data response:', response);
-      
       if (response.data.success && response.data.data) {
         setMarketData(response.data.data as MarketData);
         setError(null);
-        console.log('Backend market data loaded successfully');
       } else {
-        console.log('Backend failed, trying Yahoo Finance fallback...');
-        const fallbackData = await fetchYahooFinanceData();
-        if (fallbackData) {
-          setMarketData(fallbackData);
-          setError(null);
-        } else {
-          const errorMsg = response.data.error || "Failed to fetch market data";
-          setError(errorMsg);
-          setMarketData(null);
-        }
-      }
-    } catch (err: any) {
-      console.log('Backend error, trying Yahoo Finance fallback...');
-      const fallbackData = await fetchYahooFinanceData();
-      if (fallbackData) {
-        setMarketData(fallbackData);
-        setError(null);
-      } else {
-        const errorMsg = err.message || "Network error - is backend running?";
+        const errorMsg = response.data.error || "Failed to fetch market data";
         setError(errorMsg);
         setMarketData(null);
       }
+    } catch (err: any) {
+      const errorMsg = err.message || "Network error - is backend running?";
+      setError(errorMsg);
+      setMarketData(null);
     } finally {
       setLoading(false);
     }
