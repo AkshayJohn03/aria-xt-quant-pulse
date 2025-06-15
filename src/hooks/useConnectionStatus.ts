@@ -25,13 +25,12 @@ export const useConnectionStatus = () => {
     try {
       console.log('Fetching connection status...');
       const response = await axios.get('http://localhost:8000/api/v1/connection-status', {
-        timeout: 10000
+        timeout: 5000
       });
       
       console.log('Connection status response:', response.data);
       
       if (response.data.success) {
-        // The backend returns the status directly in data
         setStatus(response.data.data);
         setError(null);
       } else {
@@ -40,9 +39,24 @@ export const useConnectionStatus = () => {
         console.error('Connection status fetch failed:', errorMsg);
       }
     } catch (err: any) {
-      const errorMsg = err.response?.data?.error || err.message || 'Network error - is backend running?';
+      const errorMsg = 'Backend server not running on http://localhost:8000';
       setError(errorMsg);
       console.error('Connection status fetch error:', err);
+      
+      // Set fallback status when backend is not available
+      setStatus({
+        zerodha: false,
+        telegram: false,
+        market_data: false,
+        portfolio: false,
+        options: false,
+        risk_metrics: false,
+        models: false,
+        ollama: false,
+        gemini: false,
+        twelve_data: false,
+        timestamp: new Date().toISOString()
+      });
     } finally {
       setLoading(false);
     }

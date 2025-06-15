@@ -13,7 +13,8 @@ import {
   AlertCircle,
   CheckCircle,
   RefreshCw,
-  Brain
+  Brain,
+  Server
 } from 'lucide-react';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
@@ -48,16 +49,34 @@ const ConnectionStatus = () => {
       <Card className="bg-red-900/20 border-red-700">
         <CardHeader>
           <CardTitle className="text-white flex items-center">
-            <AlertCircle className="h-4 w-4 mr-2 text-red-400" />
+            <Server className="h-4 w-4 mr-2 text-red-400" />
             Connection Status
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-red-400 text-sm mb-4">{error}</div>
-          <Button onClick={refetch} size="sm" variant="outline" className="w-full">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Retry Connection
-          </Button>
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 text-red-400 text-sm">
+              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-medium">Backend Server Offline</div>
+                <div className="text-xs text-red-300 mt-1">
+                  Please start the backend server on http://localhost:8000
+                </div>
+              </div>
+            </div>
+            
+            <div className="space-y-2 pt-2 border-t border-red-800">
+              <div className="text-xs text-red-300">To start the backend:</div>
+              <div className="bg-red-950/50 p-2 rounded text-xs font-mono text-red-200">
+                cd backend && python app.py
+              </div>
+            </div>
+            
+            <Button onClick={refetch} size="sm" variant="outline" className="w-full border-red-600 text-red-300 hover:bg-red-900/50">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry Connection
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );

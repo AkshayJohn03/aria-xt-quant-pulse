@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ArrowUp, ArrowDown, Filter, Download, RefreshCw, DollarSign } from 'lucide-react';
+import { ArrowUp, ArrowDown, Filter, Download, RefreshCw, IndianRupee, AlertCircle } from 'lucide-react';
 import axios from 'axios';
 
 interface OptionData {
@@ -74,7 +74,7 @@ const OptionsChain = () => {
         setOptionData(data.option_chain || []);
         setSpotPrice(data.underlying_value || null);
         setExpiries(data.expiry_dates || []);
-        setAvailableFunds(data.available_funds || 0);
+        setAvailableFunds(data.available_funds || 100000);
         
         if (!selectedExpiry && data.expiry_dates && data.expiry_dates.length > 0) {
           setSelectedExpiry(data.expiry_dates[0]);
@@ -86,9 +86,56 @@ const OptionsChain = () => {
       }
     } catch (err: any) {
       console.error('Option chain fetch error:', err);
-      setError(err.response?.data?.error || err.message || 'Failed to fetch option chain data');
+      const errorMessage = err.code === 'ERR_NETWORK' 
+        ? 'Backend server not running on http://localhost:8000. Please start the backend server.'
+        : err.response?.data?.error || err.message || 'Failed to fetch option chain data';
+      setError(errorMessage);
+      
+      // Generate mock data for display when backend is not available
+      if (err.code === 'ERR_NETWORK') {
+        const mockData = generateMockOptionData();
+        setOptionData(mockData);
+        setSpotPrice(19850);
+        setExpiries(['2025-01-02', '2025-01-09', '2025-01-16']);
+        setAvailableFunds(100000);
+        if (!selectedExpiry) {
+          setSelectedExpiry('2025-01-02');
+        }
+      }
     }
     setLoading(false);
+  };
+
+  const generateMockOptionData = (): OptionData[] => {
+    const strikes = [19600, 19650, 19700, 19750, 19800, 19850, 19900, 19950, 20000, 20050, 20100];
+    return strikes.map(strike => ({
+      strike,
+      expiry: selectedExpiry || '2025-01-02',
+      call: {
+        ltp: Math.max(1, Math.random() * 150),
+        volume: Math.floor(Math.random() * 100000),
+        oi: Math.floor(Math.random() * 50000),
+        iv: 15 + Math.random() * 20,
+        delta: 0.1 + Math.random() * 0.8,
+        gamma: Math.random() * 0.01,
+        theta: -Math.random() * 5,
+        vega: Math.random() * 10,
+        total_cost: Math.floor((Math.max(1, Math.random() * 150)) * 50),
+        affordable: true
+      },
+      put: {
+        ltp: Math.max(1, Math.random() * 150),
+        volume: Math.floor(Math.random() * 100000),
+        oi: Math.floor(Math.random() * 50000),
+        iv: 15 + Math.random() * 20,
+        delta: -(0.1 + Math.random() * 0.8),
+        gamma: Math.random() * 0.01,
+        theta: -Math.random() * 5,
+        vega: Math.random() * 10,
+        total_cost: Math.floor((Math.max(1, Math.random() * 150)) * 50),
+        affordable: true
+      }
+    }));
   };
 
   useEffect(() => {
@@ -146,7 +193,7 @@ const OptionsChain = () => {
               <span>Spot: ₹{spotPrice?.toLocaleString()}</span>
               <span>Available Funds: ₹{formatNumber(availableFunds)}</span>
               <Badge variant="outline" className="border-green-500 text-green-400">
-                NSE Live
+                {error?.includes('Backend server not running') ? 'Mock Data' : 'NSE Live'}
               </Badge>
             </div>
           </div>
@@ -168,7 +215,7 @@ const OptionsChain = () => {
               onClick={() => setShowAffordableOnly(!showAffordableOnly)}
               className="border-slate-600 text-slate-300"
             >
-              <DollarSign className="h-4 w-4 mr-1" />
+              <IndianRupee className="h-4 w-4 mr-1" />
               Affordable Only
             </Button>
             
@@ -194,7 +241,8 @@ const OptionsChain = () => {
 
       <CardContent>
         {error && (
-          <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded">
+          <div className="mb-4 p-3 bg-red-900/20 border border-red-700 rounded flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
             <p className="text-red-400 text-sm">{error}</p>
           </div>
         )}
@@ -224,7 +272,7 @@ const OptionsChain = () => {
                         <div className="grid grid-cols-4 gap-2 text-xs">
                           <div>
                             <div className={`font-medium ${option.call.affordable ? 'text-green-400' : 'text-white'}`}>
-                              ₹{option.call.ltp}
+                              ₹{option.call.ltp.toFixed(2)}
                             </div>
                             {option.call.total_cost && (
                               <div className="text-slate-500">₹{formatNumber(option.call.total_cost)}</div>
@@ -265,7 +313,7 @@ const OptionsChain = () => {
                         <div className="grid grid-cols-4 gap-2 text-xs">
                           <div>
                             <div className={`font-medium ${option.put.affordable ? 'text-green-400' : 'text-white'}`}>
-                              ₹{option.put.ltp}
+                              ₹{option.put.ltp.toFixed(2)}
                             </div>
                             {option.put.total_cost && (
                               <div className="text-slate-500">₹{formatNumber(option.put.total_cost)}</div>
