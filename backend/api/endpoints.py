@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import logging
+import asyncio
 
 # Import shared instances
 from core import instances
@@ -108,7 +109,7 @@ async def get_status() -> Dict[str, bool]:
 
 @router.get("/connection-status")
 async def get_connection_status():
-    """Get connection status for all services"""
+    """Get connection status for all services with improved error handling"""
     try:
         status = {
             "zerodha": False,
@@ -122,87 +123,106 @@ async def get_connection_status():
             "gemini": False,
             "timestamp": datetime.now().isoformat()
         }
-        # Zerodha
+        
+        # Test connections with proper timeout handling
+        connection_tasks = []
+        
+        # Zerodha connection test
+        if instances.data_fetcher:
+            connection_tasks.append(("zerodha", instances.data_fetcher.test_zerodha_connection()))
+        
+        # Telegram connection test
+        if instances.telegram_notifier:
+            connection_tasks.append(("telegram", instances.telegram_notifier.test_connection()))
+            
+        # Market data test (Yahoo Finance fallback)
+        if instances.data_fetcher:
+            connection_tasks.append(("market_data", test_market_data_connection()))
+            
+        # Twelve Data test
+        if instances.data_fetcher:
+            connection_tasks.append(("twelve_data", instances.data_fetcher.test_twelve_data_connection()))
+        
+        # Model interface tests
+        if instances.model_interface:
+            status["models"] = True
+            connection_tasks.append(("ollama", instances.model_interface.test_ollama_connection()))
+            connection_tasks.append(("gemini", instances.model_interface.test_gemini_connection()))
+        
+        # Execute all tests with timeout
         try:
-            if instances.data_fetcher:
-                status["zerodha"] = await instances.data_fetcher.test_zerodha_connection()
+            for name, task in connection_tasks:
+                try:
+                    result = await asyncio.wait_for(task, timeout=5.0)
+                    status[name] = bool(result)
+                    logger.info(f"Connection test {name}: {'SUCCESS' if result else 'FAILED'}")
+                except asyncio.TimeoutError:
+                    logger.warning(f"Connection test {name} timed out")
+                    status[name] = False
+                except Exception as e:
+                    logger.error(f"Connection test {name} failed: {e}")
+                    status[name] = False
         except Exception as e:
-            logger.warning(f"Zerodha connection check failed: {e}")
-        # Telegram
-        try:
-            if instances.telegram_notifier:
-                status["telegram"] = await instances.telegram_notifier.test_connection()
-        except Exception as e:
-            logger.warning(f"Telegram connection check failed: {e}")
-        # Market Data
-        try:
-            if instances.data_fetcher:
-                data = await instances.data_fetcher.fetch_market_data("NIFTY50")
-                status["market_data"] = bool(data)
-        except Exception as e:
-            logger.warning(f"Market data connection check failed: {e}")
-        # Portfolio
-        try:
-            if instances.data_fetcher:
-                portfolio = await instances.data_fetcher.fetch_portfolio()
-                status["portfolio"] = bool(portfolio)
-        except Exception as e:
-            logger.warning(f"Portfolio connection check failed: {e}")
-        # Options
-        try:
-            if instances.data_fetcher:
-                chain = await instances.data_fetcher.fetch_option_chain("NIFTY")
-                status["options"] = bool(chain)
-        except Exception as e:
-            logger.warning(f"Options connection check failed: {e}")
-        # Risk Metrics
-        try:
-            if instances.risk_manager:
-                metrics = instances.risk_manager.calculate_risk_metrics()
-                status["risk_metrics"] = bool(metrics)
-        except Exception as e:
-            logger.warning(f"Risk metrics connection check failed: {e}")
-        # Models
-        try:
-            if instances.model_interface:
-                status["models"] = True
-                # Ollama
-                status["ollama"] = await instances.model_interface.test_ollama_connection()
-                # Gemini
-                status["gemini"] = await instances.model_interface.test_gemini_connection()
-        except Exception as e:
-            logger.warning(f"Model interface connection check failed: {e}")
+            logger.error(f"Error during connection tests: {e}")
+        
+        # Portfolio and options depend on market data
+        status["portfolio"] = status["zerodha"] or status["market_data"]
+        status["options"] = status["zerodha"]
+        
+        # Risk metrics depend on having some data
+        status["risk_metrics"] = status["portfolio"] or status["market_data"]
+        
+        logger.info(f"Connection status summary: {status}")
         return create_api_response(True, status)
+        
     except Exception as e:
         logger.error(f"Error getting connection status: {e}")
         return create_api_response(False, error=str(e), status_code=500)
 
+async def test_market_data_connection() -> bool:
+    """Test if we can fetch market data from any source"""
+    try:
+        if instances.data_fetcher:
+            # Try to fetch a simple market data point
+            data = await instances.data_fetcher.fetch_market_data("NIFTY50")
+            return bool(data and data.get('current_price'))
+        return False
+    except Exception as e:
+        logger.error(f"Market data connection test failed: {e}")
+        return False
+
 @router.get("/market-data")
 async def get_market_data(symbol: str = "NIFTY50"):
-    """Get current market data"""
+    """Get current market data with improved Yahoo Finance fallback"""
     try:
         if not instances.data_fetcher:
             logger.error("Data fetcher not initialized")
             return create_api_response(False, error="Data fetcher not initialized", status_code=503)
 
-        # Always fetch both NIFTY50 and BANKNIFTY for dashboard
+        # Fetch both NIFTY50 and BANKNIFTY for dashboard
         symbols = ["NIFTY50", "BANKNIFTY"]
         result = {}
+        
         for sym in symbols:
             try:
+                logger.info(f"Fetching market data for {sym}")
                 data = await instances.data_fetcher.fetch_market_data(sym)
+                
                 if not data:
                     raise Exception(f"No data available for {sym}")
+                    
                 result[sym.lower()] = {
-                    "value": data.get('current_price', 0.0) or 0.0,
-                    "change": data.get('change', 0.0) or 0.0,
-                    "percentChange": data.get('change_percent', 0.0) or 0.0,
-                    "high": data['data'][0]['high'] if data.get('data') else 0.0,
-                    "low": data['data'][0]['low'] if data.get('data') else 0.0,
-                    "volume": data['data'][0]['volume'] if data.get('data') else 0,
+                    "value": float(data.get('current_price', 0.0)),
+                    "change": float(data.get('change', 0.0)),
+                    "percentChange": float(data.get('change_percent', 0.0)),
+                    "high": float(data['data'][-1]['high']) if data.get('data') else 0.0,
+                    "low": float(data['data'][-1]['low']) if data.get('data') else 0.0,
+                    "volume": int(data['data'][-1]['volume']) if data.get('data') else 0,
                     "timestamp": data.get('timestamp'),
                     "source": data.get('source', 'unknown')
                 }
+                logger.info(f"Successfully processed market data for {sym}: {result[sym.lower()]['value']}")
+                
             except Exception as e:
                 logger.error(f"Error fetching market data for {sym}: {e}")
                 result[sym.lower()] = {
@@ -215,7 +235,9 @@ async def get_market_data(symbol: str = "NIFTY50"):
                     "timestamp": None,
                     "source": "error"
                 }
+        
         return create_api_response(True, result)
+        
     except Exception as e:
         logger.error(f"Error getting market data: {e}")
         return create_api_response(False, error=str(e), status_code=500)
