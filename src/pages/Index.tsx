@@ -17,20 +17,20 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const { marketData, loading, error } = useMarketData();
 
-  // Transform marketData to match MarketOverview expected format
-  const transformedMarketData = marketData ? {
+  // Transform marketData to match MarketOverview expected format with proper null checking
+  const transformedMarketData = marketData && marketData.nifty && marketData.banknifty ? {
     nifty: {
-      value: marketData.nifty.value,
-      change: marketData.nifty.change,
-      percentChange: marketData.nifty.percentChange
+      value: marketData.nifty?.value || 0,
+      change: marketData.nifty?.change || 0,
+      percentChange: marketData.nifty?.percentChange || 0
     },
     sensex: {
-      value: marketData.banknifty.value, // Using BANKNIFTY as SENSEX placeholder
-      change: marketData.banknifty.change,
-      percentChange: marketData.banknifty.percentChange
+      value: marketData.banknifty?.value || 0, // Using BANKNIFTY as SENSEX placeholder
+      change: marketData.banknifty?.change || 0,
+      percentChange: marketData.banknifty?.percentChange || 0
     },
     marketStatus: "OPEN", // You can add this to your backend response
-    lastUpdate: marketData.nifty.timestamp || new Date().toISOString(),
+    lastUpdate: marketData.nifty?.timestamp || new Date().toISOString(),
     aiSentiment: {
       direction: "NEUTRAL", // You can add this to your backend response
       confidence: 75 // You can add this to your backend response
