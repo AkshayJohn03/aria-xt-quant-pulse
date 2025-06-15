@@ -301,13 +301,13 @@ class TradeExecutor:
         """Initialize the trade executor with proper error handling and permissions check"""
         try:
             if not self.config_manager.config.get('zerodha', {}).get('api_key'):
-                logger.error("Zerodha API key not found in configuration")
+                logger.error("Zerodha API key not found in configuration. Please check your .env or config.json.")
                 return False
 
             self.kite = KiteConnect(api_key=self.config_manager.config['zerodha']['api_key'])
             
             if not self.config_manager.config['zerodha'].get('access_token'):
-                logger.error("Zerodha access token not found in configuration")
+                logger.error("Zerodha access token not found in configuration. Please check your .env or config.json.")
                 return False
 
             self.kite.set_access_token(self.config_manager.config['zerodha']['access_token'])
@@ -413,7 +413,7 @@ class TradeExecutor:
         """Get comprehensive portfolio data including positions, holdings, and funds"""
         try:
             if not self.kite:
-                error_msg = "Zerodha Kite client not initialized"
+                error_msg = "Zerodha Kite client not initialized. Please check your API credentials and restart the backend after updating the token."
                 logger.error(error_msg)
                 raise HTTPException(status_code=503, detail=error_msg)
 

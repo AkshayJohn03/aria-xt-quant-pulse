@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
+import httpx
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -615,11 +616,15 @@ class ModelInterface:
             return False
 
     async def test_ollama_connection(self) -> bool:
-        """Test Ollama connection"""
+        """Test Ollama connection by pinging the Ollama server."""
         try:
-            # Mock Ollama test
-            return True
-        except:
+            ollama_config = self.config.get('ollama', {})
+            base_url = ollama_config.get('base_url', 'http://localhost:11434')
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{base_url}/api/tags", timeout=3)
+                return resp.status_code == 200
+        except Exception as e:
+            logging.warning(f"Ollama connection test failed: {e}")
             return False
 
     async def initialize_models(self):

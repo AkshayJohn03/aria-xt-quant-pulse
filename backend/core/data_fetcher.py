@@ -44,6 +44,10 @@ class DataFetcher:
             except Exception as e:
                 logger.error(f"Failed to initialize KiteConnect with access token: {e}")
         else:
+            if not self.zerodha_api_key:
+                logger.error("Zerodha API key not found. Please check your .env or config.json.")
+            if not self.zerodha_access_token:
+                logger.error("Zerodha access token not found. Please check your .env or config.json.")
             logger.warning("Zerodha API key or access token not found. Zerodha market data will not be fetched.")
             
         logger.info("DataFetcher initialized.")
@@ -81,6 +85,8 @@ class DataFetcher:
                         return data
                 except Exception as e:
                     logger.warning(f"Failed to fetch from Zerodha: {e}")
+            else:
+                logger.error("Zerodha Kite client not initialized. Cannot fetch live market data from Zerodha.")
 
             # Fallback to Yahoo Finance (for NIFTY/SENSEX)
             try:
@@ -93,7 +99,7 @@ class DataFetcher:
 
             # If both fail, raise error (do not return mock data)
             logger.error(f"Failed to fetch market data for {symbol} from both Zerodha and Yahoo Finance.")
-            raise Exception(f"Failed to fetch market data for {symbol} from both Zerodha and Yahoo Finance.")
+            raise Exception(f"Failed to fetch market data for {symbol} from both Zerodha and Yahoo Finance. Please check your API credentials and network connection.")
 
         except Exception as e:
             logger.error(f"Error fetching market data: {e}")

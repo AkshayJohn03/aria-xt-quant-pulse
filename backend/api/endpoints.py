@@ -14,7 +14,8 @@ from core.instances import (
     risk_manager,
     signal_generator,
     trade_executor,
-    telegram_notifier
+    telegram_notifier,
+    init_instances
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,15 @@ async def validate_config(config: ConfigManager = Depends(get_config_manager_dep
             return create_api_response(False, error="Configuration validation failed", status_code=400)
     except Exception as e:
         logger.error(f"Error validating configuration: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
+
+@router.post("/reload-config")
+async def reload_config():
+    """Reload .env and config.json, re-initialize all shared instances."""
+    try:
+        init_instances()
+        return create_api_response(True, {"message": "Configuration and environment reloaded successfully."})
+    except Exception as e:
         return create_api_response(False, error=str(e), status_code=500)
 
 # --- System status endpoints ---

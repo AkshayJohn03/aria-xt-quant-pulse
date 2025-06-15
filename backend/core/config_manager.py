@@ -130,7 +130,6 @@ class ConfigManager:
     
     def _merge_env_variables(self):
         """Helper to explicitly merge environment variables into the loaded config."""
-        # Define mappings from config path to environment variable name
         env_map = {
             "apis.zerodha.api_key": "ZERODHA_API_KEY",
             "apis.zerodha.api_secret": "ZERODHA_API_SECRET",
@@ -142,9 +141,10 @@ class ConfigManager:
         }
 
         for config_path, env_var_name in env_map.items():
+            # Patch: treat empty string as None so env var is used
+            current_value = self.get(config_path)
             env_value = os.getenv(env_var_name)
-            if env_value is not None: # Check if environment variable is set (even if empty string)
-                # Use the existing set method for dot notation update
+            if (current_value is None or current_value == "") and env_value is not None:
                 self.set(config_path, env_value)
 
     def get(self, key: str, default: Any = None) -> Any:

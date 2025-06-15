@@ -20,6 +20,8 @@ export const useMarketData = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let dataInterval: NodeJS.Timeout | null = null;
+    let statusInterval: NodeJS.Timeout | null = null;
     const fetchMarketData = async () => {
       try {
         const response = await axios.get('/api/market-data');
@@ -45,12 +47,22 @@ export const useMarketData = () => {
     fetchMarketData();
     fetchMarketStatus();
 
-    const dataInterval = setInterval(fetchMarketData, 10000); // Refresh every 10 seconds
-    const statusInterval = setInterval(fetchMarketStatus, 30000); // Refresh every 30 seconds
+    if (!dataInterval) {
+      dataInterval = setInterval(() => {
+        console.log('Polling market data...');
+        fetchMarketData();
+      }, 30000); // Refresh every 30 seconds
+    }
+    if (!statusInterval) {
+      statusInterval = setInterval(() => {
+        console.log('Polling market status...');
+        fetchMarketStatus();
+      }, 30000); // Refresh every 30 seconds
+    }
 
     return () => {
-      clearInterval(dataInterval);
-      clearInterval(statusInterval);
+      if (dataInterval) clearInterval(dataInterval);
+      if (statusInterval) clearInterval(statusInterval);
     };
   }, []);
 

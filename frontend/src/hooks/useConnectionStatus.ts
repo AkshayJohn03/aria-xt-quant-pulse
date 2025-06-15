@@ -17,6 +17,7 @@ export const useConnectionStatus = () => {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
     const fetchStatus = async () => {
       try {
         const response = await axios.get('/api/connection-status');
@@ -35,9 +36,15 @@ export const useConnectionStatus = () => {
     };
 
     fetchStatus();
-    const interval = setInterval(fetchStatus, 30000); // Refresh every 30 seconds
-
-    return () => clearInterval(interval);
+    if (!interval) {
+      interval = setInterval(() => {
+        console.log('Polling connection status...');
+        fetchStatus();
+      }, 30000); // Refresh every 30 seconds
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   return { status, error };
