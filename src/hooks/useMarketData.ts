@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -13,7 +14,7 @@ interface MarketDataPoint {
 }
 
 interface MarketData {
-  nifty50: MarketDataPoint;
+  nifty: MarketDataPoint;
   banknifty: MarketDataPoint;
 }
 
@@ -22,39 +23,6 @@ export const useMarketData = () => {
   const [isMarketOpen, setIsMarketOpen] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-
-  const generateFallbackData = (): MarketData => {
-    const now = new Date();
-    const baseNifty = 19850;
-    const baseBankNifty = 45200;
-    
-    // Simulate small random changes
-    const niftyChange = (Math.random() - 0.5) * 200;
-    const bankNiftyChange = (Math.random() - 0.5) * 500;
-    
-    return {
-      nifty50: {
-        value: baseNifty + niftyChange,
-        change: niftyChange,
-        percentChange: (niftyChange / baseNifty) * 100,
-        high: baseNifty + Math.abs(niftyChange) + 50,
-        low: baseNifty - Math.abs(niftyChange) - 50,
-        volume: 125000000,
-        timestamp: now.toISOString(),
-        source: 'yahoo_finance_fallback'
-      },
-      banknifty: {
-        value: baseBankNifty + bankNiftyChange,
-        change: bankNiftyChange,
-        percentChange: (bankNiftyChange / baseBankNifty) * 100,
-        high: baseBankNifty + Math.abs(bankNiftyChange) + 100,
-        low: baseBankNifty - Math.abs(bankNiftyChange) - 100,
-        volume: 85000000,
-        timestamp: now.toISOString(),
-        source: 'yahoo_finance_fallback'
-      }
-    };
-  };
 
   const fetchMarketData = async () => {
     try {
@@ -66,25 +34,47 @@ export const useMarketData = () => {
       console.log('Market data response:', response.data);
       
       if (response.data.success && response.data.data) {
-        setMarketData(response.data.data);
+        const data = response.data.data;
+        
+        // Transform backend response to expected format
+        const transformedData: MarketData = {
+          nifty: data.nifty || {
+            value: 24000,
+            change: 0,
+            percentChange: 0,
+            high: 24000,
+            low: 24000,
+            volume: 0,
+            timestamp: new Date().toISOString(),
+            source: 'fallback'
+          },
+          banknifty: data.banknifty || {
+            value: 51000,
+            change: 0,
+            percentChange: 0,
+            high: 51000,
+            low: 51000,
+            volume: 0,
+            timestamp: new Date().toISOString(),
+            source: 'fallback'
+          }
+        };
+        
+        setMarketData(transformedData);
         setError(null);
+        console.log('Market data updated:', transformedData);
       } else {
         const errorMsg = response.data.error || 'Failed to fetch market data';
-        setError(`Backend: ${errorMsg}`);
         console.error('Market data fetch failed:', errorMsg);
-        
-        // Use fallback data but keep the error visible
-        if (!marketData) {
-          setMarketData(generateFallbackData());
-        }
+        setError(`Backend: ${errorMsg}`);
       }
     } catch (err: any) {
-      const errorMsg = 'Backend server not running - using Yahoo Finance fallback data';
-      setError(errorMsg);
-      console.error('Market data fetch error:', err);
+      const errorMsg = err.code === 'ERR_NETWORK' 
+        ? 'Backend server not running on http://localhost:8000. Please start the backend server.'
+        : err.response?.data?.error || err.message || 'Failed to fetch market data';
       
-      // Generate fallback Yahoo Finance data
-      setMarketData(generateFallbackData());
+      console.error('Market data fetch error:', err);
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -95,8 +85,8 @@ export const useMarketData = () => {
       const response = await axios.get('http://localhost:8000/api/v1/market-status', {
         timeout: 5000
       });
-      if (response.data && typeof response.data.is_open === 'boolean') {
-        setIsMarketOpen(response.data.is_open);
+      if (response.data.success && typeof response.data.data?.is_open === 'boolean') {
+        setIsMarketOpen(response.data.data.is_open);
       }
     } catch (err) {
       console.error('Error fetching market status:', err);
