@@ -2,15 +2,25 @@ import { useState, useEffect } from 'react';
 import axios from 'axios';
 
 interface MarketData {
-  nifty: {
+  nifty50: {
     value: number;
     change: number;
     percentChange: number;
+    high: number;
+    low: number;
+    volume: number;
+    timestamp: string | null;
+    source: string;
   };
   banknifty: {
     value: number;
     change: number;
     percentChange: number;
+    high: number;
+    low: number;
+    volume: number;
+    timestamp: string | null;
+    source: string;
   };
 }
 
@@ -25,9 +35,15 @@ export const useMarketData = () => {
     const fetchMarketData = async () => {
       try {
         const response = await axios.get('/api/market-data');
-        setMarketData(response.data);
-        setError(null);
+        if (response.data.success) {
+          setMarketData(response.data.data);
+          setError(null);
+        } else {
+          setMarketData(null);
+          setError(response.data.error || 'Failed to fetch market data');
+        }
       } catch (err) {
+        setMarketData(null);
         setError('Failed to fetch market data');
         console.error('Error fetching market data:', err);
       }

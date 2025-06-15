@@ -47,6 +47,8 @@ export const ConnectionStatus: React.FC = () => {
     { key: 'options', label: 'Options' },
     { key: 'risk_metrics', label: 'Risk Metrics' },
     { key: 'models', label: 'Models' },
+    { key: 'ollama', label: 'Ollama' },
+    { key: 'gemini', label: 'Gemini' },
   ];
 
   return (
@@ -98,18 +100,18 @@ export const ConnectionStatus: React.FC = () => {
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-500">NIFTY 50</span>
             <div className="text-right">
-              <div className="font-medium">{marketData.nifty.value.toLocaleString()}</div>
-              <div className={`text-sm ${marketData.nifty.percentChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {marketData.nifty.percentChange >= 0 ? '+' : ''}{marketData.nifty.percentChange.toFixed(2)}%
+              <div className="font-medium">{marketData.nifty50 ? marketData.nifty50.value.toLocaleString() : 'No Data'}</div>
+              <div className={`text-sm ${marketData.nifty50 && marketData.nifty50.percentChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {marketData.nifty50 ? (marketData.nifty50.percentChange >= 0 ? '+' : '') + marketData.nifty50.percentChange.toFixed(2) + '%' : ''}
               </div>
             </div>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-500">BANK NIFTY</span>
             <div className="text-right">
-              <div className="font-medium">{marketData.banknifty.value.toLocaleString()}</div>
-              <div className={`text-sm ${marketData.banknifty.percentChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {marketData.banknifty.percentChange >= 0 ? '+' : ''}{marketData.banknifty.percentChange.toFixed(2)}%
+              <div className="font-medium">{marketData.banknifty ? marketData.banknifty.value.toLocaleString() : 'No Data'}</div>
+              <div className={`text-sm ${marketData.banknifty && marketData.banknifty.percentChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {marketData.banknifty ? (marketData.banknifty.percentChange >= 0 ? '+' : '') + marketData.banknifty.percentChange.toFixed(2) + '%' : ''}
               </div>
             </div>
           </div>

@@ -118,6 +118,8 @@ async def get_connection_status():
             "options": False,
             "risk_metrics": False,
             "models": False,
+            "ollama": False,
+            "gemini": False,
             "timestamp": datetime.now().isoformat()
         }
         # Zerodha
@@ -141,8 +143,8 @@ async def get_connection_status():
             logger.warning(f"Market data connection check failed: {e}")
         # Portfolio
         try:
-            if instances.trade_executor:
-                portfolio = await instances.trade_executor.get_portfolio()
+            if instances.data_fetcher:
+                portfolio = await instances.data_fetcher.fetch_portfolio()
                 status["portfolio"] = bool(portfolio)
         except Exception as e:
             logger.warning(f"Portfolio connection check failed: {e}")
@@ -164,6 +166,10 @@ async def get_connection_status():
         try:
             if instances.model_interface:
                 status["models"] = True
+                # Ollama
+                status["ollama"] = await instances.model_interface.test_ollama_connection()
+                # Gemini
+                status["gemini"] = await instances.model_interface.test_gemini_connection()
         except Exception as e:
             logger.warning(f"Model interface connection check failed: {e}")
         return create_api_response(True, status)
@@ -179,25 +185,37 @@ async def get_market_data(symbol: str = "NIFTY50"):
             logger.error("Data fetcher not initialized")
             return create_api_response(False, error="Data fetcher not initialized", status_code=503)
 
-        data = await instances.data_fetcher.fetch_market_data(symbol)
-        if not data:
-            logger.error(f"No data available for {symbol}")
-            return create_api_response(False, error=f"No data available for {symbol}", status_code=404)
-
-        # Format the response
-        response = {
-            "symbol": symbol,
-            "current_price": data.get('current_price'),
-            "change": data.get('change'),
-            "change_percent": data.get('change_percent'),
-            "high": data['data'][0]['high'] if data['data'] else None,
-            "low": data['data'][0]['low'] if data['data'] else None,
-            "volume": data['data'][0]['volume'] if data['data'] else None,
-            "timestamp": data['timestamp'],
-            "source": data['source']
-        }
-        logger.info(f"Market data response for {symbol}: {response}")
-        return create_api_response(True, response)
+        # Always fetch both NIFTY50 and BANKNIFTY for dashboard
+        symbols = ["NIFTY50", "BANKNIFTY"]
+        result = {}
+        for sym in symbols:
+            try:
+                data = await instances.data_fetcher.fetch_market_data(sym)
+                if not data:
+                    raise Exception(f"No data available for {sym}")
+                result[sym.lower()] = {
+                    "value": data.get('current_price', 0.0) or 0.0,
+                    "change": data.get('change', 0.0) or 0.0,
+                    "percentChange": data.get('change_percent', 0.0) or 0.0,
+                    "high": data['data'][0]['high'] if data.get('data') else 0.0,
+                    "low": data['data'][0]['low'] if data.get('data') else 0.0,
+                    "volume": data['data'][0]['volume'] if data.get('data') else 0,
+                    "timestamp": data.get('timestamp'),
+                    "source": data.get('source', 'unknown')
+                }
+            except Exception as e:
+                logger.error(f"Error fetching market data for {sym}: {e}")
+                result[sym.lower()] = {
+                    "value": 0.0,
+                    "change": 0.0,
+                    "percentChange": 0.0,
+                    "high": 0.0,
+                    "low": 0.0,
+                    "volume": 0,
+                    "timestamp": None,
+                    "source": "error"
+                }
+        return create_api_response(True, result)
     except Exception as e:
         logger.error(f"Error getting market data: {e}")
         return create_api_response(False, error=str(e), status_code=500)
@@ -216,20 +234,13 @@ async def get_market_status() -> Dict[str, bool]:
 async def get_portfolio():
     """Get current portfolio status"""
     try:
-        if not instances.trade_executor:
-            raise HTTPException(status_code=503, detail="Trade executor not initialized")
-
-        portfolio = await instances.trade_executor.get_portfolio()
-        if not portfolio:
-            return {
-                "status": "offline",
-                "message": "Unable to fetch portfolio data",
-                "timestamp": datetime.now().isoformat()
-            }
-        return portfolio
+        if not instances.data_fetcher:
+            return create_api_response(False, error="Data fetcher not initialized", status_code=503)
+        portfolio = await instances.data_fetcher.fetch_portfolio()
+        return create_api_response(True, portfolio)
     except Exception as e:
         logger.error(f"Error getting portfolio: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return create_api_response(False, error=str(e), status_code=500)
 
 # --- Trading endpoints ---
 @router.get("/positions")
@@ -307,13 +318,30 @@ async def get_risk_metrics():
     """Get current risk metrics"""
     try:
         if not instances.risk_manager:
-            raise HTTPException(status_code=503, detail="Risk manager not initialized")
-
+            return create_api_response(False, error="Risk manager not initialized", status_code=503)
         metrics = instances.risk_manager.calculate_risk_metrics()
-        return metrics
+        if not metrics:
+            # Return default structure
+            metrics = {
+                'total_investment': 0.0,
+                'portfolio_value': 0.0,
+                'total_pnl': 0.0,
+                'day_pnl': 0.0,
+                'portfolio_exposure_percent': 0.0,
+                'risk_score': 'LOW',
+                'sector_exposure': {},
+                'correlations': {},
+                'portfolio_volatility': 0.0,
+                'sharpe_ratio': 0.0,
+                'sortino_ratio': 0.0,
+                'max_drawdown': 0.0,
+                'current_drawdown': 0.0,
+                'available_balance': 0.0
+            }
+        return create_api_response(True, metrics)
     except Exception as e:
         logger.error(f"Error getting risk metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.post("/notify")
 async def send_notification(message: Dict[str, Any]):

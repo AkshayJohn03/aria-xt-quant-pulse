@@ -9,8 +9,14 @@ import yfinance as yf  # Add yfinance import
 import pytz
 import pandas as pd
 import numpy as np
+import os
 
 logger = logging.getLogger(__name__)
+
+# To enable Zerodha MCP fallback for portfolio:
+# Add these to backend/.env:
+# ZERODHA_MCP_TOKEN=your_mcp_token_here
+# ZERODHA_MCP_URL=https://mcp.zerodha.com/api/v1/portfolio
 
 class DataFetcher:
     def __init__(self, config_manager: ConfigManager):
@@ -664,3 +670,33 @@ class DataFetcher:
         except Exception as e:
             logger.error(f"An unexpected error occurred during Twelve Data connection test: {e}")
             return False
+
+    async def fetch_portfolio(self):
+        """Fetch portfolio from Zerodha Kite, fallback to MCP if needed."""
+        # Try Zerodha Kite first
+        if self.kite:
+            try:
+                return await asyncio.to_thread(self.kite.holdings)
+            except Exception as e:
+                logger.error(f"Error fetching from Zerodha: {e}")
+                if "permission" not in str(e).lower():
+                    raise
+        # Fallback to MCP
+        try:
+            import httpx
+            mcp_token = os.getenv("ZERODHA_MCP_TOKEN")
+            mcp_url = os.getenv("ZERODHA_MCP_URL", "https://mcp.zerodha.com/api/v1/portfolio")
+            if not mcp_token:
+                logger.error("MCP token not configured. Set ZERODHA_MCP_TOKEN in .env.")
+                raise Exception("MCP token not configured.")
+            headers = {"Authorization": f"Bearer {mcp_token}"}
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(mcp_url, headers=headers, timeout=10)
+                if resp.status_code == 200:
+                    return resp.json()
+                else:
+                    logger.error(f"MCP portfolio fetch failed: {resp.text}")
+                    raise Exception(f"MCP portfolio fetch failed: {resp.text}")
+        except Exception as e:
+            logger.error(f"Portfolio fetch failed from both Zerodha and MCP: {e}")
+            raise
