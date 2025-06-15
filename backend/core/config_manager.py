@@ -3,7 +3,7 @@ import os
 from typing import Dict, Any, Optional
 from pathlib import Path
 import logging
-from dotenv import load_dotenv # ADD THIS IMPORT
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
@@ -11,10 +11,12 @@ class ConfigManager:
     """Manages application configuration and settings"""
     
     def __init__(self, config_file: str = "config.json"):
-        load_dotenv() # ADD THIS LINE: Loads environment variables from .env
+        # Always load .env from the backend directory
+        dotenv_path = Path(__file__).resolve().parent.parent / ".env"
+        load_dotenv(dotenv_path)
         self.config_file = Path(config_file)
         self.config = self.load_config()
-        self._merge_env_variables() # ADD THIS LINE: Merge env vars after loading JSON
+        self._merge_env_variables()
     
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file or create default"""
