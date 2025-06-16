@@ -349,3 +349,129 @@ class StrategyEngine:
         except Exception as e:
             logger.error(f"Error generating signals: {str(e)}")
             raise 
+
+    def generate_straddle_signals(self, df: pd.DataFrame, atm_strike: float, expiry: str) -> list:
+        """
+        Generate ATM straddle signals for NIFTY50 options.
+        Buys both ATM call and put, delta-neutral, profits from volatility expansion.
+        """
+        signals = []
+        try:
+            # Find ATM strike row
+            atm_row = df.iloc[(df['close'] - atm_strike).abs().argsort()[:1]]
+            for idx, row in atm_row.iterrows():
+                for option_type in ['CE', 'PE']:
+                    signals.append({
+                        'timestamp': row.name,
+                        'signal_type': 'BUY',
+                        'strike': atm_strike,
+                        'option_type': option_type,
+                        'expiry': expiry,
+                        'strategy': 'ATM Straddle',
+                        'confidence_score': 1.0
+                    })
+            return signals
+        except Exception as e:
+            logger.error(f"Error generating straddle signals: {e}")
+            return []
+
+    def generate_strangle_signals(self, df: pd.DataFrame, lower_strike: float, upper_strike: float, expiry: str) -> list:
+        """
+        Generate strangle signals for NIFTY50 options.
+        Buys OTM put and OTM call, delta-neutral, profits from large moves.
+        """
+        signals = []
+        try:
+            lower_row = df.iloc[(df['close'] - lower_strike).abs().argsort()[:1]]
+            upper_row = df.iloc[(df['close'] - upper_strike).abs().argsort()[:1]]
+            for idx, row in lower_row.iterrows():
+                signals.append({
+                    'timestamp': row.name,
+                    'signal_type': 'BUY',
+                    'strike': lower_strike,
+                    'option_type': 'PE',
+                    'expiry': expiry,
+                    'strategy': 'Strangle',
+                    'confidence_score': 1.0
+                })
+            for idx, row in upper_row.iterrows():
+                signals.append({
+                    'timestamp': row.name,
+                    'signal_type': 'BUY',
+                    'strike': upper_strike,
+                    'option_type': 'CE',
+                    'expiry': expiry,
+                    'strategy': 'Strangle',
+                    'confidence_score': 1.0
+                })
+            return signals
+        except Exception as e:
+            logger.error(f"Error generating strangle signals: {e}")
+            return []
+
+    def generate_volatility_breakout_signals(self, df: pd.DataFrame, window: int = 20) -> list:
+        """
+        Volatility breakout: Buy call if price breaks above recent high + k*ATR, buy put if below low - k*ATR.
+        Used in HFT and momentum trading.
+        """
+        signals = []
+        try:
+            recent_high = df['high'].rolling(window=window).max()
+            recent_low = df['low'].rolling(window=window).min()
+            atr = self._calculate_atr(df, self.config.atr_period)
+            k = 1.5
+            for i in range(window, len(df)):
+                if df['close'].iloc[i] > recent_high.iloc[i-1] + k * atr.iloc[i-1]:
+                    signals.append({
+                        'timestamp': df.index[i],
+                        'signal_type': 'BUY',
+                        'option_type': 'CE',
+                        'strategy': 'Volatility Breakout',
+                        'confidence_score': 1.0
+                    })
+                elif df['close'].iloc[i] < recent_low.iloc[i-1] - k * atr.iloc[i-1]:
+                    signals.append({
+                        'timestamp': df.index[i],
+                        'signal_type': 'BUY',
+                        'option_type': 'PE',
+                        'strategy': 'Volatility Breakout',
+                        'confidence_score': 1.0
+                    })
+            return signals
+        except Exception as e:
+            logger.error(f"Error generating volatility breakout signals: {e}")
+            return []
+
+    def generate_stat_arb_signals(self, df1: pd.DataFrame, df2: pd.DataFrame, z_threshold: float = 2.0) -> list:
+        """
+        Statistical arbitrage: Pairs trading, mean reversion between NIFTY50 and BANKNIFTY or other correlated assets.
+        """
+        signals = []
+        try:
+            spread = df1['close'] - df2['close']
+            mean = spread.rolling(window=30).mean()
+            std = spread.rolling(window=30).std()
+            zscore = (spread - mean) / std
+            for i in range(30, len(df1)):
+                if zscore.iloc[i] > z_threshold:
+                    signals.append({
+                        'timestamp': df1.index[i],
+                        'signal_type': 'SELL',
+                        'asset': 'NIFTY50',
+                        'hedge_asset': 'BANKNIFTY',
+                        'strategy': 'StatArb',
+                        'confidence_score': abs(zscore.iloc[i])
+                    })
+                elif zscore.iloc[i] < -z_threshold:
+                    signals.append({
+                        'timestamp': df1.index[i],
+                        'signal_type': 'BUY',
+                        'asset': 'NIFTY50',
+                        'hedge_asset': 'BANKNIFTY',
+                        'strategy': 'StatArb',
+                        'confidence_score': abs(zscore.iloc[i])
+                    })
+            return signals
+        except Exception as e:
+            logger.error(f"Error generating stat arb signals: {e}")
+            return [] 

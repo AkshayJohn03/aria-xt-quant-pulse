@@ -622,9 +622,13 @@ class ModelInterface:
             base_url = ollama_config.get('base_url', 'http://localhost:11434')
             async with httpx.AsyncClient() as client:
                 resp = await client.get(f"{base_url}/api/tags", timeout=3)
-                return resp.status_code == 200
+                if resp.status_code == 200:
+                    return True
+                else:
+                    logging.warning(f"Ollama server responded with status {resp.status_code}. Is Ollama running at {base_url}? Start with 'ollama serve'.")
+                    return False
         except Exception as e:
-            logging.warning(f"Ollama connection test failed: {e}")
+            logging.warning(f"Ollama connection test failed: {e}. Is Ollama running at {base_url}? Start with 'ollama serve'.")
             return False
 
     async def initialize_models(self):
@@ -644,3 +648,17 @@ class ModelInterface:
                 logging.warning(f"✗ {service.upper()} model unavailable")
         
         logging.info("Model initialization complete")
+
+    async def warmup_ollama_model(self, model_name: str):
+        """Send a dummy request to Ollama to load the model on startup."""
+        import httpx
+        base_url = self.config.get('ollama', {}).get('base_url', 'http://localhost:11434')
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(f"{base_url}/api/generate", json={"model": model_name, "prompt": "ping"}, timeout=10)
+                if resp.status_code == 200:
+                    logging.info(f"Ollama model '{model_name}' warmed up successfully.")
+                else:
+                    logging.warning(f"Ollama warmup failed for model '{model_name}': HTTP {resp.status_code}")
+        except Exception as e:
+            logging.warning(f"Ollama warmup failed for model '{model_name}': {e}")

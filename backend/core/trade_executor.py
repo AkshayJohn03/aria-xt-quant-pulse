@@ -748,3 +748,12 @@ class TradeExecutor:
         except Exception as e:
             logger.error(f"Error getting order status: {e}")
             raise Exception("Error getting order status")
+
+    async def test_connection(self) -> bool:
+        """Test connection to Zerodha (KiteConnect) if available."""
+        if hasattr(self, 'broker') and self.broker:
+            try:
+                return await self.broker.connect()
+            except Exception:
+                return False
+        return False
