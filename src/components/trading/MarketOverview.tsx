@@ -110,6 +110,28 @@ const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData, loading = f
     currentAiSentimentDirection === "BEARISH" ? "bg-red-500/20 text-red-400 border-red-400" :
     "bg-gray-500/20 text-gray-400 border-gray-400";
 
+  // Format the last update time
+  const formatLastUpdate = (dateStr: string) => {
+    try {
+      // If the date is already in DD-MM-YYYY HH:mm:ss format, return as is
+      if (dateStr.match(/^\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2}$/)) {
+        return dateStr;
+      }
+      // Otherwise, parse and format
+      const date = new Date(dateStr);
+      return date.toLocaleString('en-IN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).replace(/\//g, '-');
+    } catch (e) {
+      return dateStr;
+    }
+  };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -157,11 +179,11 @@ const MarketOverview: React.FC<MarketOverviewProps> = ({ marketData, loading = f
       <Card className="bg-slate-800/50 border-slate-700">
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-sm font-medium text-slate-300">Market Status</CardTitle>
-          <div className="h-2 w-2 bg-green-400 rounded-full"></div> {/* Static status light for now */}
+          <div className={`h-2 w-2 rounded-full ${currentMarketStatus === "OPEN" ? "bg-green-400" : "bg-red-400"}`}></div>
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold text-white">{currentMarketStatus}</div>
-          <p className="text-xs text-slate-400">Last update: {currentLastUpdate}</p>
+          <p className="text-xs text-slate-400">Last update: {formatLastUpdate(currentLastUpdate)}</p>
         </CardContent>
       </Card>
 

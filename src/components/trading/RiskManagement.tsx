@@ -1,23 +1,21 @@
-
 import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Shield, AlertTriangle, Target, TrendingDown, Settings } from 'lucide-react';
+import { usePortfolio } from '@/hooks/useAriaAPI';
 
 const RiskManagement = () => {
-  const [riskMetrics] = useState({
-    portfolioValue: 125000,
-    maxDrawdown: 8.2,
-    currentDrawdown: 3.1,
-    riskPerTrade: 2.5,
-    winRate: 68.4,
-    sharpeRatio: 1.85,
-    volatility: 14.2,
-    exposureLimit: 85,
-    currentExposure: 67
-  });
+  const { portfolio, loading, error } = usePortfolio();
+  const riskMetrics = portfolio?.risk_metrics;
+
+  if (loading) {
+    return <div>Loading risk metrics...</div>;
+  }
+  if (error || !riskMetrics) {
+    return <div>Error loading risk metrics: {error || 'No data'}</div>;
+  }
 
   const [activeRisks] = useState([
     {
@@ -92,22 +90,22 @@ const RiskManagement = () => {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="text-center p-3 bg-slate-700/50 rounded-lg">
               <div className="text-sm text-slate-400">Portfolio Risk</div>
-              <div className="text-xl font-bold text-yellow-400">Medium</div>
-              <div className="text-xs text-slate-500">Score: 6.2/10</div>
+              <div className="text-xl font-bold text-yellow-400">{riskMetrics.risk_score}</div>
+              <div className="text-xs text-slate-500">Score: {riskMetrics.sharpe_ratio?.toFixed(2) ?? 'N/A'}</div>
             </div>
             <div className="text-center p-3 bg-slate-700/50 rounded-lg">
               <div className="text-sm text-slate-400">Max Drawdown</div>
-              <div className="text-xl font-bold text-red-400">{riskMetrics.maxDrawdown}%</div>
+              <div className="text-xl font-bold text-red-400">{riskMetrics.max_drawdown?.toFixed(2) ?? 'N/A'}%</div>
               <div className="text-xs text-slate-500">Historical</div>
             </div>
             <div className="text-center p-3 bg-slate-700/50 rounded-lg">
               <div className="text-sm text-slate-400">Current DD</div>
-              <div className="text-xl font-bold text-orange-400">{riskMetrics.currentDrawdown}%</div>
+              <div className="text-xl font-bold text-orange-400">{riskMetrics.current_drawdown?.toFixed(2) ?? 'N/A'}%</div>
               <div className="text-xs text-slate-500">Live</div>
             </div>
             <div className="text-center p-3 bg-slate-700/50 rounded-lg">
               <div className="text-sm text-slate-400">Sharpe Ratio</div>
-              <div className="text-xl font-bold text-green-400">{riskMetrics.sharpeRatio}</div>
+              <div className="text-xl font-bold text-green-400">{riskMetrics.sharpe_ratio?.toFixed(2) ?? 'N/A'}</div>
               <div className="text-xs text-slate-500">Risk-adjusted</div>
             </div>
           </div>
@@ -116,27 +114,17 @@ const RiskManagement = () => {
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-slate-400">Portfolio Exposure</span>
-              <span className="text-white">{riskMetrics.currentExposure}% / {riskMetrics.exposureLimit}%</span>
+              <span className="text-white">{riskMetrics.portfolio_exposure_percent?.toFixed(2) ?? 'N/A'}%</span>
             </div>
             <Progress 
-              value={riskMetrics.currentExposure} 
-              max={riskMetrics.exposureLimit}
+              value={riskMetrics.portfolio_exposure_percent ?? 0} 
+              max={100}
               className="h-2"
             />
           </div>
 
-          {/* Risk per Trade */}
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-400">Risk per Trade</span>
-              <span className="text-white">{riskMetrics.riskPerTrade}%</span>
-            </div>
-            <Progress 
-              value={riskMetrics.riskPerTrade} 
-              max={5}
-              className="h-2"
-            />
-          </div>
+          {/* Risk per Trade - removed, not available in backend risk metrics */}
+
         </CardContent>
       </Card>
 

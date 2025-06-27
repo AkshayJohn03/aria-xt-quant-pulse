@@ -1,11 +1,11 @@
-# D:\aria\aria-xt-quant-pulse\backend\core\trade_executor.py
-
 import logging
 import asyncio
 import random
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Union
+import pytz
+from fastapi import HTTPException
 
 # Attempt to import KiteConnect, allow for mock if not installed
 try:
@@ -16,8 +16,7 @@ except ImportError:
     KiteConnect = None
     KITE_CONNECT_AVAILABLE = False
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # --- Abstract Base Class for Broker Clients ---
 class BrokerBase:
@@ -95,7 +94,8 @@ class ZerodhaBroker(BrokerBase):
 
     async def get_positions(self) -> Optional[List[Dict[str, Any]]]:
         if not self.kite:
-            return None
+            logger.error("Zerodha Kite client not initialized")
+            raise HTTPException(status_code=503, detail="Broker connection not initialized")
         try:
             positions_data = await asyncio.to_thread(self.kite.positions)
             net_positions = positions_data.get('net', [])
@@ -110,13 +110,24 @@ class ZerodhaBroker(BrokerBase):
                         "current_price": pos.get('last_price', 0),
                         "pnl": pos.get('pnl', 0),
                         "instrument_token": pos.get('instrument_token'),
-                        "product": pos.get('product')
+                        "product": pos.get('product'),
+                        "exchange": pos.get('exchange'),
+                        "trading_symbol": pos.get('tradingsymbol'),
+                        "m2m": pos.get('m2m', 0),
+                        "unrealised": pos.get('unrealised', 0),
+                        "realised": pos.get('realised', 0),
+                        "buy_quantity": pos.get('buy_quantity', 0),
+                        "sell_quantity": pos.get('sell_quantity', 0),
+                        "buy_value": pos.get('buy_value', 0),
+                        "sell_value": pos.get('sell_value', 0),
+                        "multiplier": pos.get('multiplier', 1)
                     })
-            logging.info(f"Fetched {len(parsed_positions)} active Zerodha positions.")
+            logger.info(f"Successfully fetched {len(parsed_positions)} active Zerodha positions")
             return parsed_positions
         except Exception as e:
-            logging.error(f"Failed to fetch Zerodha positions: {e}")
-            return None
+            error_msg = f"Failed to fetch Zerodha positions: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
 
     async def get_holdings(self) -> Optional[List[Dict[str, Any]]]:
         if not self.kite:
@@ -276,119 +287,473 @@ class TradeExecutor:
     """
     Manages connections to brokerage APIs, places orders, and fetches trade-related data.
     """
-    def __init__(self, config: Dict[str, Any], risk_manager: Any, telegram_notifier: Any):
-        self.config = config
-        self.risk_manager = risk_manager
-        self.telegram_notifier = telegram_notifier # Store the notifier
-        self.live_trading_enabled = config.get("trading.live_trading_enabled", False)
-        self.broker = None  # Will be set in connect_to_broker or _initialize_broker
-        self.connected = False
+    
+    def __init__(self, config_manager):
+        self.config_manager = config_manager
+        self.kite = None
+        self.broker = None
+        self.portfolio_cache = None
+        self.last_cache_update = None
+        self.cache_ttl = 60  # Cache TTL in seconds
+        self.initialize()
 
-        logging.info(f"TradeExecutor initialized. Live trading enabled: {self.live_trading_enabled}")
+    def initialize(self):
+        """Initialize the trade executor with proper error handling and permissions check"""
+        try:
+            if not self.config_manager.config.get('zerodha', {}).get('api_key'):
+                logger.error("Zerodha API key not found in configuration. Please check your .env or config.json.")
+                return False
 
-    async def connect_to_broker(self) -> bool:
-        """Connect to the specified brokerage API."""
-        logging.info("Attempting to connect to brokerage API...")
-        
-        # Get Zerodha configuration
-        api_key = self.config.get("apis", {}).get("zerodha", {}).get("api_key")
-        access_token = self.config.get("apis", {}).get("zerodha", {}).get("access_token")
+            self.kite = KiteConnect(api_key=self.config_manager.config['zerodha']['api_key'])
+            
+            if not self.config_manager.config['zerodha'].get('access_token'):
+                logger.error("Zerodha access token not found in configuration. Please check your .env or config.json.")
+                return False
 
-        if api_key and access_token and KITE_CONNECT_AVAILABLE:
+            self.kite.set_access_token(self.config_manager.config['zerodha']['access_token'])
+            
+            # Test connection and permissions
             try:
-                # Initialize KiteConnect client
-                kite = KiteConnect(api_key=api_key)
-                kite.set_access_token(access_token)
+                # Test basic profile access
+                profile = self.kite.profile()
+                logger.info(f"Successfully connected to Zerodha for user: {profile.get('user_name')}")
                 
-                # Create broker adapter
-                self.broker_client = ZerodhaBroker(kite)
-                self.connected = await self.broker_client.connect()
+                # Test required permissions
+                required_permissions = [
+                    'orders', 'positions', 'holdings', 'margins',
+                    'market_data', 'order_place', 'order_modify'
+                ]
                 
-                if self.connected:
-                    logging.info("Successfully connected to Zerodha Kite.")
-                    return True
-                else:
-                    logging.error("Failed to connect to Zerodha Kite.")
-                    
+                for permission in required_permissions:
+                    try:
+                        if permission == 'orders':
+                            self.kite.orders()
+                        elif permission == 'positions':
+                            self.kite.positions()
+                        elif permission == 'holdings':
+                            self.kite.holdings()
+                        elif permission == 'margins':
+                            self.kite.margins()
+                        elif permission == 'market_data':
+                            self.kite.quote('NSE:NIFTY 50')
+                        elif permission == 'order_place':
+                            # Just check if we can access order placement
+                            pass
+                        elif permission == 'order_modify':
+                            # Just check if we can access order modification
+                            pass
+                        logger.info(f"Successfully verified {permission} permission")
+                    except Exception as e:
+                        logger.error(f"Missing or insufficient permission for {permission}: {str(e)}")
+                        return False
+
+                self.broker = ZerodhaBroker(self.kite)
+                logger.info("TradeExecutor initialized with Zerodha broker and all required permissions")
+                return True
+                
             except Exception as e:
-                logging.error(f"Failed to initialize Zerodha connection: {e}")
-        
-        # Fallback to mock broker
-        logging.warning("Using Mock Broker for trading operations.")
-        self.broker_client = MockBroker()
-        self.connected = await self.broker_client.connect()
-        return self.connected
+                logger.error(f"Failed to verify Zerodha connection and permissions: {str(e)}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error initializing TradeExecutor: {str(e)}")
+            return False
+
+    async def connect(self):
+        """Connect to the broker"""
+        try:
+            if not self.broker:
+                logger.error("Broker not initialized")
+                return False
+            return await self.broker.connect()
+        except Exception as e:
+            logger.error(f"Error connecting to broker: {e}")
+            return False
+
+    async def disconnect(self):
+        """Disconnect from the broker"""
+        try:
+            self.kite = None
+            self.broker = None
+            logger.info("Disconnected from broker")
+            return True
+        except Exception as e:
+            logger.error(f"Error disconnecting from broker: {e}")
+            return False
+
+    async def update_portfolio_cache(self):
+        """Update the portfolio cache"""
+        try:
+            if not self.broker:
+                logger.error("Broker not initialized")
+                return False
+
+            positions = await self.broker.get_positions()
+            holdings = await self.broker.get_holdings()
+            funds = await self.broker.get_funds()
+
+            if positions is None and holdings is None and funds is None:
+                logger.error("Failed to fetch portfolio data")
+                return False
+
+            self.portfolio_cache = {
+                "positions": positions or [],
+                "holdings": holdings or [],
+                "funds": funds or {},
+                "timestamp": datetime.now().isoformat()
+            }
+            self.last_cache_update = datetime.now()
+            logger.info("Portfolio cache updated")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating portfolio cache: {e}")
+            return False
+
+    async def get_portfolio(self) -> Dict[str, Any]:
+        """Get comprehensive portfolio data including positions, holdings, and funds"""
+        try:
+            if not self.kite:
+                error_msg = "Zerodha Kite client not initialized. Please check your API credentials and restart the backend after updating the token."
+                logger.error(error_msg)
+                raise HTTPException(status_code=503, detail=error_msg)
+
+            # Fetch all portfolio components concurrently
+            positions_task = self.get_positions()
+            holdings_task = self.get_holdings()
+            funds_task = self.get_funds()
+            
+            positions, holdings, funds = await asyncio.gather(
+                positions_task, holdings_task, funds_task,
+                return_exceptions=True
+            )
+
+            # Handle any exceptions from the concurrent tasks
+            if isinstance(positions, Exception):
+                error_msg = f"Error fetching positions: {str(positions)}"
+                logger.error(error_msg)
+                raise HTTPException(status_code=500, detail=error_msg)
+            if isinstance(holdings, Exception):
+                error_msg = f"Error fetching holdings: {str(holdings)}"
+                logger.error(error_msg)
+                raise HTTPException(status_code=500, detail=error_msg)
+            if isinstance(funds, Exception):
+                error_msg = f"Error fetching funds: {str(funds)}"
+                logger.error(error_msg)
+                raise HTTPException(status_code=500, detail=error_msg)
+
+            # Calculate portfolio metrics
+            total_value = 0
+            total_pnl = 0
+            total_m2m = 0
+            total_unrealised = 0
+            total_realised = 0
+
+            # Process positions
+            for pos in positions:
+                total_value += abs(pos.get('quantity', 0) * pos.get('current_price', 0))
+                total_pnl += pos.get('pnl', 0)
+                total_m2m += pos.get('m2m', 0)
+                total_unrealised += pos.get('unrealised', 0)
+                total_realised += pos.get('realised', 0)
+
+            # Process holdings
+            for holding in holdings:
+                total_value += holding.get('quantity', 0) * holding.get('last_price', 0)
+
+            # Get available funds
+            available_cash = funds.get('available_cash', 0)
+            free_margin = funds.get('free_margin', 0)
+            used_margin = funds.get('used_margin', 0)
+
+            portfolio_data = {
+                "timestamp": datetime.now().isoformat(),
+                "positions": positions,
+                "holdings": holdings,
+                "funds": {
+                    "available_cash": available_cash,
+                    "free_margin": free_margin,
+                    "used_margin": used_margin,
+                    "total_margin": free_margin + used_margin
+                },
+                "metrics": {
+                    "total_value": total_value,
+                    "total_pnl": total_pnl,
+                    "total_m2m": total_m2m,
+                    "total_unrealised": total_unrealised,
+                    "total_realised": total_realised,
+                    "net_value": total_value + available_cash
+                },
+                "risk_metrics": {
+                    "margin_utilization": (used_margin / (free_margin + used_margin)) * 100 if (free_margin + used_margin) > 0 else 0,
+                    "cash_utilization": (used_margin / available_cash) * 100 if available_cash > 0 else 0,
+                    "position_concentration": len(positions) / self.config_manager.config.get('trading', {}).get('max_positions', 5) * 100
+                }
+            }
+
+            logger.info(f"Successfully fetched comprehensive portfolio data with {len(positions)} positions and {len(holdings)} holdings")
+            return portfolio_data
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            error_msg = f"Error fetching portfolio data: {str(e)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+
+    def _is_cache_valid(self) -> bool:
+        """Check if the portfolio cache is still valid"""
+        if not self.portfolio_cache or not self.last_cache_update:
+            return False
+        return (datetime.now() - self.last_cache_update).seconds < self.cache_ttl
+
+    async def execute_trade(self, signal: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a trade based on the signal"""
+        try:
+            if not self.broker:
+                return {
+                    "status": "error",
+                    "message": "Broker not initialized",
+                    "timestamp": datetime.now().isoformat()
+                }
+
+            order_details = {
+                "symbol": signal.get("symbol"),
+                "type": signal.get("type", "BUY"),
+                "quantity": signal.get("quantity"),
+                "price": signal.get("price"),
+                "order_type": signal.get("order_type", "MARKET"),
+                "product_type": signal.get("product_type", "MIS")
+            }
+
+            result = await self.broker.place_order(order_details)
+            if not result:
+                return {
+                    "status": "error",
+                    "message": "Failed to place order",
+                    "timestamp": datetime.now().isoformat()
+                }
+
+            # Update portfolio cache after trade
+            await self.update_portfolio_cache()
+
+            return {
+                "status": "success",
+                "data": result,
+                "timestamp": datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error executing trade: {e}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
 
     async def place_order(self, order_details: Dict[str, Any], max_retries: int = 3) -> Optional[Dict[str, Any]]:
         """Places an order on the brokerage platform with retry logic."""
-        if not self.broker_client:
-            logging.error("Broker client not initialized. Cannot place order.")
+        if not self.kite:
+            logger.error("Broker client not initialized. Cannot place order.")
             return None
 
         # Check risk limits before placing order
         trade_value = order_details.get('price', 0) * order_details.get('quantity', 0)
-        if not self.risk_manager.check_per_trade_risk(trade_value):
-            logging.warning(f"Order placement aborted due to per-trade risk limit: {order_details}")
+        if self.risk_manager and not self.risk_manager.check_per_trade_risk(trade_value):
+            logger.warning(f"Order placement aborted due to per-trade risk limit: {order_details}")
             return {"status": "aborted", "error": "Per-trade risk limit exceeded", "details": order_details}
         
         attempt = 0
         while attempt < max_retries:
             try:
-                result = await self.broker_client.place_order(order_details)
+                result = await self.kite.place_order(order_details)
                 if result and result.get("status") == "success":
-                    logging.info(f"Order placed successfully: {result}")
+                    logger.info(f"Order placed successfully: {result}")
                     return result
                 else:
-                    logging.warning(f"Order attempt {attempt+1} failed: {result}. Retrying...")
+                    logger.warning(f"Order attempt {attempt+1} failed: {result}. Retrying...")
             except Exception as e:
-                logging.error(f"Order attempt {attempt+1} exception: {e}. Retrying...")
+                logger.error(f"Order attempt {attempt+1} exception: {e}. Retrying...")
             
             attempt += 1
             if attempt < max_retries:
-                time.sleep(2) # Backoff before retry
+                await asyncio.sleep(2)  # Async backoff before retry
         
-        logging.error(f"Order failed after {max_retries} attempts: {order_details}. Max retries exceeded.")
+        logger.error(f"Order failed after {max_retries} attempts: {order_details}. Max retries exceeded.")
         return {"status": "failed", "error": "Max retries exceeded", "details": order_details}
 
-    async def get_order_status(self, order_id: str) -> Optional[Dict[str, Any]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_order_status(order_id)
+    def get_positions(self) -> List[Dict[str, Any]]:
+        """Get enhanced position details."""
+        try:
+            self.update_portfolio_cache()
+            
+            enhanced_positions = []
+            for position in self.portfolio_cache['positions']:
+                # Calculate P&L
+                quantity = position.get('quantity', 0)
+                avg_price = position.get('average_price', 0)
+                current_price = position.get('last_price', 0)
+                day_open = position.get('day_open_price', avg_price)
+                
+                investment = abs(quantity * avg_price)
+                current_value = abs(quantity * current_price)
+                day_value = abs(quantity * day_open)
+                
+                total_pnl = current_value - investment
+                day_pnl = current_value - day_value
+                
+                enhanced_positions.append({
+                    'symbol': position.get('tradingsymbol', ''),
+                    'exchange': position.get('exchange', ''),
+                    'quantity': quantity,
+                    'avg_price': avg_price,
+                    'current_price': current_price,
+                    'pnl': total_pnl,
+                    'day_pnl': day_pnl,
+                    'product_type': position.get('product', 'N/A'),
+                    'last_trade_time': position.get('last_trade_time', ''),
+                    'unrealized_pnl': position.get('unrealized_pnl', 0),
+                    'realized_pnl': position.get('realized_pnl', 0)
+                })
+            
+            return enhanced_positions
+            
+        except Exception as e:
+            logger.error(f"Error getting positions: {e}")
+            raise Exception("Error getting positions")
 
-    async def get_positions(self) -> Optional[List[Dict[str, Any]]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_positions()
+    def get_holdings(self) -> List[Dict[str, Any]]:
+        """Get holdings with enhanced details."""
+        try:
+            self.update_portfolio_cache()
+            
+            enhanced_holdings = []
+            for holding in self.portfolio_cache['holdings']:
+                quantity = holding.get('quantity', 0)
+                avg_price = holding.get('average_price', 0)
+                current_price = holding.get('last_price', 0)
+                day_open = holding.get('day_open_price', avg_price)
+                
+                investment = quantity * avg_price
+                current_value = quantity * current_price
+                day_value = quantity * day_open
+                
+                total_pnl = current_value - investment
+                day_pnl = current_value - day_value
+                
+                enhanced_holdings.append({
+                    'symbol': holding.get('tradingsymbol', ''),
+                    'exchange': holding.get('exchange', ''),
+                    'quantity': quantity,
+                    'avg_price': avg_price,
+                    'current_price': current_price,
+                    'pnl': total_pnl,
+                    'day_pnl': day_pnl,
+                    'product_type': 'CNC',  # Holdings are always delivery
+                    'last_trade_time': holding.get('last_trade_time', ''),
+                    'unrealized_pnl': total_pnl,  # For holdings, total PnL is unrealized
+                    'realized_pnl': 0  # No realized PnL for holdings until sold
+                })
+            
+            return enhanced_holdings
+            
+        except Exception as e:
+            logger.error(f"Error getting holdings: {e}")
+            raise Exception("Error getting holdings")
 
-    async def get_holdings(self) -> Optional[List[Dict[str, Any]]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_holdings()
+    def get_funds(self) -> Dict[str, Any]:
+        """Get enhanced funds data."""
+        try:
+            self.update_portfolio_cache()
+            return self.portfolio_cache['available_balance']
+        except Exception as e:
+            logger.error(f"Error getting funds: {e}")
+            raise Exception("Error getting funds")
 
-    async def get_funds(self) -> Optional[Dict[str, Any]]:
-        if not self.broker_client:
-            return None
-        return await self.broker_client.get_funds()
+    def place_order(self, order_params: Dict[str, Any]) -> Dict[str, Any]:
+        """Place an order with Zerodha."""
+        try:
+            if not self.kite:
+                raise Exception("Not connected to broker")
+                
+            order_id = self.kite.place_order(
+                variety=order_params.get('variety', 'regular'),
+                exchange=order_params.get('exchange', 'NSE'),
+                tradingsymbol=order_params.get('symbol'),
+                transaction_type=order_params.get('transaction_type'),
+                quantity=order_params.get('quantity'),
+                product=order_params.get('product', 'MIS'),
+                order_type=order_params.get('order_type', 'MARKET'),
+                price=order_params.get('price', 0),
+                trigger_price=order_params.get('trigger_price', 0)
+            )
+            
+            logger.info(f"Order placed successfully. Order ID: {order_id}")
+            return {"order_id": order_id, "status": "success"}
+            
+        except Exception as e:
+            logger.error(f"Error placing order: {e}")
+            raise Exception("Error placing order")
 
-    async def square_off_position(self, symbol: str, quantity: int = 0, product_type: str = "MIS") -> bool:
-        if not self.broker_client:
-            return False
-        return await self.broker_client.square_off_position(symbol, quantity, product_type)
+    def modify_order(self, order_id: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Modify an existing order."""
+        try:
+            if not self.kite:
+                raise Exception("Not connected to broker")
+                
+            self.kite.modify_order(
+                order_id=order_id,
+                variety=params.get('variety', 'regular'),
+                quantity=params.get('quantity'),
+                price=params.get('price'),
+                trigger_price=params.get('trigger_price'),
+                order_type=params.get('order_type'),
+                validity=params.get('validity')
+            )
+            
+            logger.info(f"Order {order_id} modified successfully")
+            return {"order_id": order_id, "status": "success"}
+            
+        except Exception as e:
+            logger.error(f"Error modifying order: {e}")
+            raise Exception("Error modifying order")
 
-    async def get_portfolio_overview(self) -> Dict[str, Any]:
-        """
-        Fetches live portfolio details (positions, holdings, funds) from Zerodha and returns a summary dict.
-        """
-        positions = await self.get_positions() or []
-        holdings = await self.get_holdings() or []
-        funds = await self.get_funds() or {}
-        total_value = sum([p.get('current_price', 0) * abs(p.get('quantity', 0)) for p in positions])
-        total_holdings_value = sum([h.get('last_price', 0) * abs(h.get('quantity', 0)) for h in holdings])
-        return {
-            'positions': positions,
-            'holdings': holdings,
-            'funds': funds,
-            'total_value': total_value + total_holdings_value + funds.get('available_cash', 0),
-            'positions_count': len(positions),
-            'holdings_count': len(holdings)
-        }
+    def cancel_order(self, order_id: str) -> Dict[str, Any]:
+        """Cancel an order."""
+        try:
+            if not self.kite:
+                raise Exception("Not connected to broker")
+                
+            self.kite.cancel_order(order_id=order_id, variety='regular')
+            
+            logger.info(f"Order {order_id} cancelled successfully")
+            return {"order_id": order_id, "status": "success"}
+            
+        except Exception as e:
+            logger.error(f"Error cancelling order: {e}")
+            raise Exception("Error cancelling order")
+
+    def get_order_status(self, order_id: str) -> Dict[str, Any]:
+        """Get the current status of an order."""
+        try:
+            if not self.kite:
+                raise Exception("Not connected to broker")
+                
+            orders = self.kite.orders()
+            order = next((o for o in orders if o['order_id'] == order_id), None)
+            
+            if not order:
+                raise Exception(f"Order {order_id} not found")
+                
+            return order
+            
+        except Exception as e:
+            logger.error(f"Error getting order status: {e}")
+            raise Exception("Error getting order status")
+
+    async def test_connection(self) -> bool:
+        """Test connection to Zerodha (KiteConnect) if available."""
+        if hasattr(self, 'broker') and self.broker:
+            try:
+                return await self.broker.connect()
+            except Exception:
+                return False
+        return False

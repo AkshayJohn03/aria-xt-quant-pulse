@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aria XT Quant Pulse - Trading Bot Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .loading {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+        .loading-content {
+            text-align: center;
+            color: white;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <!-- Loading Overlay -->
+    <div id="loading" class="loading">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <p>Running Backtest...</p>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold mb-8 text-center">Aria XT Quant Pulse Dashboard</h1>
+
+        <!-- Backtesting Section -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Backtesting</h2>
+            
+            <!-- Backtest Form -->
+            <form id="backtestForm" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Symbol -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Symbol</label>
+                    <input type="text" name="symbol" placeholder="e.g., NIFTY" required
+                           class="w-full px-3 py-2 border rounded-md">
+                </div>
+                
+                <!-- Date Range -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input type="date" name="start_date" required
+                           class="w-full px-3 py-2 border rounded-md">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">End Date</label>
+                    <input type="date" name="end_date" required
+                           class="w-full px-3 py-2 border rounded-md">
+                </div>
+                
+                <!-- Strategy Profile -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Strategy Profile</label>
+                    <select name="strategy_profile" class="w-full px-3 py-2 border rounded-md">
+                        <option value="hybrid">Hybrid</option>
+                        <option value="ai-only">AI Only</option>
+                        <option value="fallback-only">Fallback Only</option>
+                    </select>
+                </div>
+                
+                <!-- Trading Mode -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Trading Mode</label>
+                    <select name="mode" class="w-full px-3 py-2 border rounded-md">
+                        <option value="safe">Safe</option>
+                        <option value="aggressive">Aggressive</option>
+                    </select>
+                </div>
+                
+                <!-- Initial Capital -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Initial Capital (₹)</label>
+                    <input type="number" name="initial_capital" value="100000" min="10000" step="10000"
+                           class="w-full px-3 py-2 border rounded-md">
+                </div>
+                
+                <!-- Max Trades Per Day -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Max Trades Per Day</label>
+                    <input type="number" name="max_trades_per_day" value="3" min="1" max="10"
+                           class="w-full px-3 py-2 border rounded-md">
+                </div>
+                
+                <!-- Risk Per Trade -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Risk Per Trade (%)</label>
+                    <input type="number" name="risk_per_trade" value="2" min="0.5" max="5" step="0.5"
+                           class="w-full px-3 py-2 border rounded-md">
+                </div>
+                
+                <!-- Submit Button -->
+                <div class="md:col-span-2 lg:col-span-3">
+                    <button type="submit"
+                            class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
+                        Run Backtest
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results" class="hidden">
+            <!-- Performance Metrics -->
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+                <h3 class="text-lg font-semibold mb-4">Performance Metrics</h3>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">Total Trades</p>
+                        <p id="totalTrades" class="text-xl font-bold">-</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">Win Rate</p>
+                        <p id="winRate" class="text-xl font-bold">-</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">Total P&L</p>
+                        <p id="totalPnL" class="text-xl font-bold">-</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">Max Drawdown</p>
+                        <p id="maxDrawdown" class="text-xl font-bold">-</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">Sharpe Ratio</p>
+                        <p id="sharpeRatio" class="text-xl font-bold">-</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">Avg. Profit/Trade</p>
+                        <p id="avgProfitPerTrade" class="text-xl font-bold">-</p>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-lg">
+                        <p class="text-sm text-gray-600">Avg. Trade Duration</p>
+                        <p id="avgTradeDuration" class="text-xl font-bold">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                <!-- Equity Curve -->
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-lg font-semibold mb-4">Equity Curve</h3>
+                    <div id="equityCurve" style="height: 400px;"></div>
+                </div>
+                
+                <!-- Drawdown Chart -->
+                <div class="bg-white rounded-lg shadow-lg p-6">
+                    <h3 class="text-lg font-semibold mb-4">Drawdown</h3>
+                    <div id="drawdownChart" style="height: 400px;"></div>
+                </div>
+            </div>
+
+            <!-- Trade Log -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h3 class="text-lg font-semibold mb-4">Trade Log</h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead>
+                            <tr>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entry Time</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exit Time</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Strike</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Option</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entry</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Exit</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">P&L</th>
+                                <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tradeLog" class="bg-white divide-y divide-gray-200">
+                            <!-- Trade rows will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
+</body>
+</html> 

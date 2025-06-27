@@ -1,326 +1,373 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+from datetime import datetime
 import logging
+import asyncio
+import random
+import httpx
+import re
+import pandas as pd
+import yfinance as yf
 
-from core.config_manager import ConfigManager
-from core.data_fetcher import DataFetcher
-from core.model_interface import ModelInterface
-from core.risk_manager import RiskManager
-from core.trade_executor import TradeExecutor
-
-# Import global instances from app.py to ensure singletons are used
-# IMPORTANT: These imports must be after config_manager, data_fetcher, etc. are defined in app.py
-from app import config_manager, data_fetcher, model_interface, risk_manager, signal_generator, trade_executor, telegram_notifier, system_status, run_backtest_logic_helper
+# Import shared instances
+from core import instances
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Dependency injection - now using the global instances initialized in app.py
-def get_config_manager_dep():
-    return config_manager
+def create_api_response(success: bool, data: Any = None, error: str = None, status_code: int = 200):
+    """Helper function to create consistent API responses"""
+    response_data = {
+        "success": success,
+        "data": data,
+        "error": error,
+        "timestamp": datetime.now().isoformat()
+    }
+    return JSONResponse(content=response_data, status_code=status_code)
 
-def get_data_fetcher_dep():
-    return data_fetcher
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return create_api_response(True, {
+        "status": "healthy",
+        "message": "API is running",
+        "timestamp": datetime.now().isoformat()
+    })
 
-def get_model_interface_dep():
-    return model_interface
-
-def get_risk_manager_dep():
-    return risk_manager
-
-# --- Configuration endpoints ---
-@router.get("/config")
-async def get_config(config: ConfigManager = Depends(get_config_manager_dep)):
-    """Get current configuration"""
+@router.get("/connection-status")
+async def get_connection_status():
+    """Get connection status for all services"""
     try:
-        return JSONResponse(content={"success": True, "data": config.config, "error": None})
+        status = {
+            "zerodha": False,
+            "telegram": False,
+            "market_data": False,
+            "portfolio": False,
+            "options": False,
+            "risk_metrics": False,
+            "models": False,
+            "ollama": False,
+            "gemini": False,
+            "twelve_data": False,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        # Market data
+        if instances.data_fetcher:
+            try:
+                test_data = await instances.data_fetcher.fetch_market_data("NIFTY50")
+                status["market_data"] = test_data is not None
+                logger.info(f"Market data test: {'SUCCESS' if status['market_data'] else 'FAILED'}")
+            except Exception as e:
+                logger.error(f"Market data test failed: {e}")
+                status["market_data"] = False
+
+        # Twelve Data
+        if instances.data_fetcher:
+            try:
+                status["twelve_data"] = await instances.data_fetcher.test_twelve_data_connection()
+            except Exception:
+                status["twelve_data"] = False
+
+        # Zerodha
+        if hasattr(instances, "trade_executor") and instances.trade_executor:
+            try:
+                status["zerodha"] = await instances.trade_executor.test_connection()
+            except Exception as e:
+                logger.error(f"Zerodha connection test failed: {e}")
+                status["zerodha"] = False
+
+        # Portfolio
+        if hasattr(instances, "trade_executor") and instances.trade_executor:
+            try:
+                portfolio = await instances.trade_executor.get_portfolio()
+                status["portfolio"] = bool(portfolio and (portfolio.get("positions") or portfolio.get("holdings")))
+            except Exception as e:
+                logger.error(f"Portfolio test failed: {e}")
+                status["portfolio"] = False
+
+        # Telegram
+        if hasattr(instances, "telegram_notifier") and instances.telegram_notifier:
+            try:
+                status["telegram"] = await instances.telegram_notifier.test_connection()
+                logger.info(f"Telegram connection status: {status['telegram']}")
+            except Exception as e:
+                logger.error(f"Telegram connection test failed: {e}")
+                status["telegram"] = False
+
+        # Ollama
+        if hasattr(instances, "model_interface") and instances.model_interface:
+            try:
+                status["ollama"] = await instances.model_interface.test_ollama_connection()
+            except Exception as e:
+                logger.error(f"Ollama connection test failed: {e}")
+                status["ollama"] = False
+
+        # Gemini
+        if hasattr(instances, "model_interface") and instances.model_interface:
+            try:
+                status["gemini"] = await instances.model_interface.test_gemini_connection()
+            except Exception as e:
+                logger.error(f"Gemini connection test failed: {e}")
+                status["gemini"] = False
+
+        logger.info(f"Connection status check completed: {sum(1 for v in status.values() if v is True)} services online")
+        return create_api_response(True, status)
     except Exception as e:
-        logger.error(f"Error fetching configuration: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        logger.error(f"Error getting connection status: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
 
-@router.post("/config")
-async def update_config(
-    updates: Dict[str, Any],
-    config: ConfigManager = Depends(get_config_manager_dep)
-):
-    """Update configuration"""
-    try:
-        success = config.update_config(updates)
-        if success:
-            return JSONResponse(content={"success": True, "data": {"message": "Configuration updated successfully"}, "error": None})
-        else:
-            return JSONResponse(content={"success": False, "data": None, "error": "Failed to update configuration"}, status_code=500)
-    except Exception as e:
-        logger.error(f"Error updating configuration: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
-
-@router.get("/config/validate")
-async def validate_config(config: ConfigManager = Depends(get_config_manager_dep)):
-    """Validate current configuration"""
-    try:
-        is_valid = config.validate_config()
-        return JSONResponse(content={"success": True, "data": {"valid": is_valid}, "error": None})
-    except Exception as e:
-        logger.error(f"Error validating configuration: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
-# --- Market data endpoints ---
 @router.get("/market-data")
 async def get_market_data():
-    """Get current market data (NIFTY 50, SENSEX) from Zerodha."""
+    """Get current market data for NIFTY50 and BANKNIFTY"""
     try:
-        from app import data_fetcher
-        data = await data_fetcher.fetch_market_data()
-        # Ensure both keys are present, even if one or both are missing
-        result = {
-            "nifty": data.get("nifty") if data and "nifty" in data else {"value": None, "change": None, "percentChange": None},
-            "sensex": data.get("sensex") if data and "sensex" in data else {"value": None, "change": None, "percentChange": None},
-            "lastUpdate": datetime.now().isoformat()
-        }
-        return JSONResponse(content={"success": True, "data": result, "error": None})
-    except Exception as e:
-        logging.error(f"Error fetching market data: {e}")
-        # Always return both keys with None values on error
-        result = {
-            "nifty": {"value": None, "change": None, "percentChange": None},
-            "sensex": {"value": None, "change": None, "percentChange": None},
-            "lastUpdate": datetime.now().isoformat()
-        }
-        return JSONResponse(content={"success": False, "data": result, "error": str(e)}, status_code=500)
+        if not instances.data_fetcher:
+            logger.error("Data fetcher not initialized")
+            return create_api_response(False, error="Data fetcher not initialized", status_code=503)
 
-@router.get("/ohlcv/{symbol}")
-async def get_ohlcv_data(
-    symbol: str,
-    timeframe: str = "1min",
-    limit: int = 100,
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)
-):
-    """Get OHLCV data for a symbol"""
-    try:
-        ohlcv_data = await data_fetcher_inst.fetch_live_ohlcv(symbol, timeframe, limit)
-        return JSONResponse(content={"success": True, "data": {"symbol": symbol, "timeframe": timeframe, "data": ohlcv_data}, "error": None})
+        # Fetch both NIFTY50 and BANKNIFTY
+        symbols = ["NIFTY50", "BANKNIFTY"]
+        result = {}
+        
+        for symbol in symbols:
+            try:
+                logger.info(f"Fetching market data for {symbol}")
+                data = await instances.data_fetcher.fetch_market_data(symbol)
+                
+                if data:
+                    # Map to frontend expected format
+                    symbol_key = symbol.lower().replace("50", "")  # nifty50 -> nifty, banknifty -> banknifty
+                    result[symbol_key] = {
+                        "value": float(data.get('current_price', 0.0)),
+                        "change": float(data.get('change', 0.0)),
+                        "percentChange": float(data.get('change_percent', 0.0)),
+                        "high": float(data.get('high_24h', 0.0)),
+                        "low": float(data.get('low_24h', 0.0)),
+                        "volume": int(data.get('volume', 0)),
+                        "timestamp": data.get('timestamp'),
+                        "source": data.get('source', 'unknown')
+                    }
+                    logger.info(f"Processed market data for {symbol}: ₹{result[symbol_key]['value']:.2f} ({result[symbol_key]['percentChange']:+.2f}%)")
+                else:
+                    logger.warning(f"No data returned for {symbol}")
+                
+            except Exception as e:
+                logger.error(f"Error fetching market data for {symbol}: {e}")
+                continue
+        
+        if not result:
+            logger.error("Failed to fetch market data for any symbol")
+            return create_api_response(False, error="Failed to fetch market data for any symbol", status_code=500)
+        
+        logger.info(f"Market data fetch completed successfully for {len(result)} symbols")
+        return create_api_response(True, result)
+        
     except Exception as e:
-        logger.error(f"Error fetching OHLCV data for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        logger.error(f"Error in market data endpoint: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
+
+@router.get("/market-status")
+async def get_market_status():
+    """Get current market status"""
+    try:
+        is_open = False
+        if instances.data_fetcher:
+            is_open = instances.data_fetcher.is_market_open()
+        
+        logger.info(f"Market status: {'OPEN' if is_open else 'CLOSED'}")
+        return create_api_response(True, {"is_open": is_open})
+    except Exception as e:
+        logger.error(f"Error getting market status: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.get("/option-chain")
-async def get_option_chain(
-    symbol: str = "NIFTY",
-    expiry: Optional[str] = None,
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)
-):
-    """Get option chain data"""
+async def get_option_chain(symbol: str = "NIFTY", expiry: Optional[str] = None):
+    """Get option chain data from NSE India with session and headers, retry and fallback to Yahoo if blocked."""
     try:
-        option_chain = await data_fetcher_inst.fetch_option_chain(symbol, expiry)
-        return JSONResponse(content={"success": True, "data": {"symbol": symbol, "expiry": expiry, "data": option_chain}, "error": None})
+        nse_symbol = symbol.upper()
+        base_url = "https://www.nseindia.com"
+        option_chain_url = f"{base_url}/api/option-chain-indices?symbol={nse_symbol}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{base_url}/option-chain",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive"
+        }
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.get(base_url, headers=headers)
+            for attempt in range(2):
+                resp = await client.get(option_chain_url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    all_expiries = data['records']['expiryDates']
+                    expiry_to_use = expiry or (all_expiries[0] if all_expiries else None)
+                    option_data = [item for item in data['records']['data'] if item.get('expiryDate') == expiry_to_use]
+                    option_chain = []
+                    for item in option_data:
+                        strike = item.get('strikePrice')
+                        ce = item.get('CE', {})
+                        pe = item.get('PE', {})
+                        option_chain.append({
+                            "strike": strike,
+                            "expiry": expiry_to_use,
+                            "call": {
+                                "ltp": ce.get('lastPrice'),
+                                "volume": ce.get('totalTradedVolume'),
+                                "oi": ce.get('openInterest'),
+                                "chng": ce.get('change'),
+                                "iv": ce.get('impliedVolatility'),
+                            },
+                            "put": {
+                                "ltp": pe.get('lastPrice'),
+                                "volume": pe.get('totalTradedVolume'),
+                                "oi": pe.get('openInterest'),
+                                "chng": pe.get('change'),
+                                "iv": pe.get('impliedVolatility'),
+                            }
+                        })
+                    result = {
+                        "symbol": symbol,
+                        "underlying_value": data['records']['underlyingValue'],
+                        "expiry_dates": all_expiries,
+                        "option_chain": option_chain,
+                        "source": "nse_india",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    return create_api_response(True, result)
+                elif resp.status_code == 401 and attempt == 0:
+                    await asyncio.sleep(2)  # Wait and retry
+                else:
+                    break
+        # Fallback: Yahoo Finance (mocked structure, no real option chain)
+        ticker = yf.Ticker("^NSEI")
+        hist = ticker.history(period="5d", interval="1d")
+        strikes = [int(hist['Close'].iloc[-1] // 50) * 50 + i * 50 for i in range(-4, 5)]
+        option_chain = [
+            {
+                "strike": strike,
+                "expiry": expiry or "N/A",
+                "call": {"ltp": None, "volume": None, "oi": None, "chng": None, "iv": None},
+                "put": {"ltp": None, "volume": None, "oi": None, "chng": None, "iv": None}
+            }
+            for strike in strikes
+        ]
+        return create_api_response(False, {
+            "symbol": symbol,
+            "underlying_value": hist['Close'].iloc[-1] if not hist.empty else None,
+            "expiry_dates": [expiry] if expiry else [],
+            "option_chain": option_chain,
+            "source": "yahoo_fallback",
+            "timestamp": datetime.now().isoformat(),
+            "reason": "NSE blocked automated requests. Showing fallback structure."
+        }, error="NSE option chain fetch failed", status_code=500)
     except Exception as e:
-        logger.error(f"Error fetching option chain for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        logger.error(f"Error fetching option chain: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
 
-# --- Model and prediction endpoints ---
-@router.post("/prediction")
-async def generate_prediction(
-    symbol: str,
-    timeframe: str = "1min",
-    model_interface_inst: ModelInterface = Depends(get_model_interface_dep),
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep)
-):
-    """Generate price prediction"""
-    try:
-        ohlcv_data = await data_fetcher_inst.fetch_live_ohlcv(symbol, timeframe, 100)
-        prediction = await model_interface_inst.generate_prediction(ohlcv_data)
-        
-        return JSONResponse(content={
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "prediction": prediction,
-                "timestamp": datetime.now().isoformat()
-            },
-            "error": None
-        })
-    except Exception as e:
-        logger.error(f"Error generating prediction for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
-@router.post("/trading-signal")
-async def generate_trading_signal(
-    symbol: str = "NIFTY",
-    model_interface_inst: ModelInterface = Depends(get_model_interface_dep),
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
-    risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)
-):
-    """Generate trading signal"""
-    try:
-        ohlcv_data = await data_fetcher_inst.fetch_live_ohlcv(symbol)
-        option_chain = await data_fetcher_inst.fetch_option_chain(symbol)
-        
-        signal = await model_interface_inst.generate_trading_signal(ohlcv_data, option_chain)
-        
-        if signal:
-            is_valid = risk_manager_inst.validate_signal(signal)
-            signal["validated"] = is_valid
-        
-        return JSONResponse(content={
-            "success": True,
-            "data": {
-                "symbol": symbol,
-                "signal": signal,
-                "timestamp": datetime.now().isoformat()
-            },
-            "error": None
-        })
-    except Exception as e:
-        logger.error(f"Error generating trading signal for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
-# --- Portfolio and risk management endpoints ---
 @router.get("/portfolio")
 async def get_portfolio():
-    """Get live portfolio overview (positions, holdings, funds) from Zerodha."""
+    """Get current portfolio (positions, holdings, funds)"""
     try:
-        from app import trade_executor
-        data = await trade_executor.get_portfolio_overview()
-        return JSONResponse(content={"success": True, "data": data, "error": None})
+        if hasattr(instances, "trade_executor") and instances.trade_executor:
+            try:
+                portfolio = await instances.trade_executor.get_portfolio()
+                if portfolio:
+                    return create_api_response(True, portfolio)
+            except Exception as e:
+                logger.error(f"Error fetching portfolio: {e}")
+        # Fallback: always return a valid structure
+        fallback = {
+            "positions": [],
+            "holdings": [],
+            "funds": {"available": 0.0, "used": 0.0, "total": 0.0},
+            "timestamp": datetime.now().isoformat(),
+            "source": "fallback"
+        }
+        return create_api_response(True, fallback)
     except Exception as e:
-        logging.error(f"Error fetching portfolio: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
-@router.get("/positions")
-async def get_positions(
-    status: Optional[str] = None,
-    risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)
-):
-    """Get positions with optional status filter"""
-    try:
-        all_positions = risk_manager_inst.get_positions() # Use the new get_positions
-        if status:
-            positions = [p for p in all_positions if p.get("status", "").upper() == status.upper()]
-        else:
-            positions = all_positions
-        
-        return JSONResponse(content={"success": True, "data": {"positions": positions, "count": len(positions)}, "error": None})
-    except Exception as e:
-        logger.error(f"Error fetching positions: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        logger.error(f"Error in portfolio endpoint: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
 
 @router.get("/risk-metrics")
-async def get_risk_metrics(risk_manager_inst: RiskManager = Depends(get_risk_manager_dep)):
-    """Get current risk metrics"""
+async def get_risk_metrics():
+    """Get current risk metrics for the portfolio"""
     try:
-        risk_metrics = risk_manager_inst.calculate_risk_metrics()
-        return JSONResponse(content={"success": True, "data": risk_metrics, "error": None})
+        if hasattr(instances, "risk_manager") and instances.risk_manager:
+            try:
+                metrics = instances.risk_manager.calculate_risk_metrics()
+                if metrics:
+                    return create_api_response(True, metrics)
+            except Exception as e:
+                logger.error(f"Error fetching risk metrics: {e}")
+        # Fallback: always return a valid structure
+        fallback = {
+            "total_pnl": 0.0,
+            "portfolio_volatility": 0.0,
+            "risk_score": "N/A",
+            "portfolio_exposure_percent": 0.0,
+            "sector_exposure": {},
+            "correlations": {},
+            "timestamp": datetime.now().isoformat(),
+            "source": "fallback",
+            "reason": "No real portfolio data available. Zerodha not connected or portfolio is empty."
+        }
+        return create_api_response(True, fallback)
     except Exception as e:
-        logger.error(f"Error calculating risk metrics: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
+        logger.error(f"Error in risk metrics endpoint: {e}")
+        return create_api_response(False, error=str(e), status_code=500)
 
-# --- Backtesting endpoints ---
-@router.post("/backtest")
-async def run_backtest(
-    start_date: str,
-    end_date: str,
-    symbol: str = "NIFTY",
-    strategy: str = "aria-lstm",
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
-    model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
-):
-    """Run backtesting for a specific period"""
+@router.get("/ohlc")
+async def get_ohlc(symbol: str = "NIFTY50", interval: str = "1d", limit: int = 100):
+    """Get OHLC data for charting (NSE or Yahoo fallback)"""
     try:
-        historical_data = await data_fetcher_inst.fetch_historical_ohlcv(
-            symbol, start_date, end_date
-        )
-        
-        # Use the imported run_backtest_logic_helper
-        backtest_results = await run_backtest_logic_helper(
-            historical_data, strategy, model_interface_inst
-        )
-        
-        return JSONResponse(content={
-            "success": True,
-            "data": {
-                "strategy": strategy,
-                "period": f"{start_date} to {end_date}",
-                "results": backtest_results,
-                "timestamp": datetime.now().isoformat()
-            },
-            "error": None
-        })
+        # Try NSE first
+        nse_symbol = {"NIFTY50": "NIFTY", "BANKNIFTY": "BANKNIFTY"}.get(symbol, "NIFTY")
+        base_url = "https://www.nseindia.com"
+        chart_url = f"{base_url}/api/chart-databyindex?index={nse_symbol}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{base_url}/chart",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Connection": "keep-alive"
+        }
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.get(base_url, headers=headers)
+            resp = await client.get(chart_url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                candles = data.get('grapthData', [])[-limit:]
+                ohlc = [
+                    {
+                        "timestamp": c[0],
+                        "open": c[1],
+                        "high": c[2],
+                        "low": c[3],
+                        "close": c[4],
+                        "volume": c[5] if len(c) > 5 else 0
+                    }
+                    for c in candles
+                ]
+                return create_api_response(True, {"symbol": symbol, "ohlc": ohlc, "source": "nse_india"})
+        # Yahoo fallback
+        ticker_map = {"NIFTY50": "^NSEI", "BANKNIFTY": "^NSEBANK"}
+        ticker = yf.Ticker(ticker_map.get(symbol, "^NSEI"))
+        hist = ticker.history(period="max", interval=interval)
+        ohlc = [
+            {
+                "timestamp": str(idx),
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": int(row["Volume"])
+            }
+            for idx, row in hist.tail(limit).iterrows()
+        ]
+        return create_api_response(True, {"symbol": symbol, "ohlc": ohlc, "source": "yahoo_finance"})
     except Exception as e:
-        logger.error(f"Error running backtest for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
-@router.post("/backtest/live")
-async def run_live_backtest(
-    symbol: str = "NIFTY",
-    hours: int = 1,
-    strategy: str = "aria-lstm",
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
-    model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
-):
-    """Run backtest with live data from the last N hours"""
-    try:
-        
-        live_data = await data_fetcher_inst.fetch_live_ohlcv(
-            symbol, "1min", hours * 60
-        )
-        
-        backtest_results = await run_backtest_logic_helper(
-            live_data, strategy, model_interface_inst
-        )
-        
-        return JSONResponse(content={
-            "success": True,
-            "data": {
-                "strategy": strategy,
-                "period": f"Last {hours} hours",
-                "data_points": len(live_data),
-                "results": backtest_results,
-                "timestamp": datetime.now().isoformat()
-            },
-            "error": None
-        })
-    except Exception as e:
-        logger.error(f"Error running live backtest for {symbol}: {e}")
-        return JSONResponse(content={"success": False, "data": None, "error": str(e)}, status_code=500)
-
-# --- Connection status endpoint ---
-@router.get("/connection-status")
-async def get_connection_status(
-    data_fetcher_inst: DataFetcher = Depends(get_data_fetcher_dep),
-    model_interface_inst: ModelInterface = Depends(get_model_interface_dep)
-):
-    """Get status of all external connections (robust to partial failures)"""
-    status = {}
-    # Zerodha
-    try:
-        status["zerodha"] = await data_fetcher_inst.test_zerodha_connection()
-    except Exception as e:
-        logger.error(f"Zerodha connection check failed: {e}")
-        status["zerodha"] = False
-    # Twelve Data
-    try:
-        status["twelve_data"] = await data_fetcher_inst.test_twelve_data_connection()
-    except Exception as e:
-        logger.error(f"Twelve Data connection check failed: {e}")
-        status["twelve_data"] = False
-    # Gemini
-    try:
-        status["gemini"] = await model_interface_inst.test_gemini_connection()
-    except Exception as e:
-        logger.error(f"Gemini connection check failed: {e}")
-        status["gemini"] = False
-    # Ollama
-    try:
-        status["ollama"] = await model_interface_inst.test_ollama_connection()
-    except Exception as e:
-        logger.error(f"Ollama connection check failed: {e}")
-        status["ollama"] = False
-    status["last_update"] = datetime.now().isoformat()
-    # Ensure all values are boolean for all()
-    overall_health = all(s for key, s in status.items() if key != "last_update")
-    return JSONResponse(content={"success": True, "data": {"connections": status, "overall_health": overall_health}, "error": None})
+        logger.error(f"Error fetching OHLC data: {e}")
+        return create_api_response(False, error=str(e), status_code=500)

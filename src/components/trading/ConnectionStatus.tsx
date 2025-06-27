@@ -12,9 +12,11 @@ import {
   TrendingUp,
   AlertCircle,
   CheckCircle,
-  RefreshCw
+  RefreshCw,
+  Brain,
+  Server
 } from 'lucide-react';
-import { useConnectionStatus } from '@/hooks/useAriaAPI';
+import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 
 const ConnectionStatus = () => {
   const { status, loading, error, refetch } = useConnectionStatus();
@@ -30,7 +32,7 @@ const ConnectionStatus = () => {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {[...Array(5)].map((_, i) => (
+            {[...Array(6)].map((_, i) => (
               <div key={i} className="flex items-center justify-between animate-pulse">
                 <div className="h-4 bg-slate-600 rounded w-1/2"></div>
                 <div className="h-6 bg-slate-600 rounded w-16"></div>
@@ -44,34 +46,41 @@ const ConnectionStatus = () => {
 
   if (error) {
     return (
-      <Card className="bg-slate-800/50 border-slate-700">
+      <Card className="bg-red-900/20 border-red-700">
         <CardHeader>
           <CardTitle className="text-white flex items-center">
-            <AlertCircle className="h-4 w-4 mr-2 text-red-400" />
+            <Server className="h-4 w-4 mr-2 text-red-400" />
             Connection Status
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-red-400 text-sm mb-4">{error}</div>
-          <Button onClick={refetch} size="sm" variant="outline" className="w-full">
-            Retry
-          </Button>
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 text-red-400 text-sm">
+              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div>
+                <div className="font-medium">Backend Server Offline</div>
+                <div className="text-xs text-red-300 mt-1">
+                  Please start the backend server on http://localhost:8000
+                </div>
+              </div>
+            </div>
+            
+            <div className="space-y-2 pt-2 border-t border-red-800">
+              <div className="text-xs text-red-300">To start the backend:</div>
+              <div className="bg-red-950/50 p-2 rounded text-xs font-mono text-red-200">
+                cd backend && python app.py
+              </div>
+            </div>
+            
+            <Button onClick={refetch} size="sm" variant="outline" className="w-full border-red-600 text-red-300 hover:bg-red-900/50">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry Connection
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
   }
-
-  const connections = status?.connections || {};
-  const brokerConnected = status?.broker_connected || false;
-  const systemStatus = status?.system_status || {};
-
-  const getStatusIcon = (isConnected: boolean) => {
-    return isConnected ? (
-      <CheckCircle className="h-4 w-4 text-green-400" />
-    ) : (
-      <AlertCircle className="h-4 w-4 text-red-400" />
-    );
-  };
 
   const getStatusBadge = (isConnected: boolean) => {
     return (
@@ -85,107 +94,76 @@ const ConnectionStatus = () => {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Main Connection Status */}
-      <Card className="bg-slate-800/50 border-slate-700">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="text-white flex items-center">
-            <Wifi className="h-4 w-4 mr-2" />
-            Connection Status
-          </CardTitle>
-          <Button onClick={refetch} size="sm" variant="ghost">
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Broker Connection */}
+    <Card className="bg-slate-800/50 border-slate-700">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <CardTitle className="text-white flex items-center">
+          <Wifi className="h-4 w-4 mr-2" />
+          System Status
+        </CardTitle>
+        <Button onClick={refetch} size="sm" variant="ghost">
+          <RefreshCw className="h-4 w-4" />
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* API Connections */}
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <TrendingUp className="h-4 w-4 text-blue-400" />
-              <span className="text-sm text-slate-300">Broker (Zerodha)</span>
+              <span className="text-sm text-slate-300">Zerodha</span>
             </div>
-            {getStatusBadge(brokerConnected)}
+            {getStatusBadge(status?.zerodha || false)}
           </div>
 
-          {/* API Connections */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Database className="h-4 w-4 text-purple-400" />
-                <span className="text-sm text-slate-300">Zerodha API</span>
-              </div>
-              {getStatusBadge(connections.zerodha)}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Database className="h-4 w-4 text-purple-400" />
+              <span className="text-sm text-slate-300">Market Data</span>
             </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Database className="h-4 w-4 text-blue-400" />
-                <span className="text-sm text-slate-300">Twelve Data</span>
-              </div>
-              {getStatusBadge(connections.twelve_data)}
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Bot className="h-4 w-4 text-green-400" />
-                <span className="text-sm text-slate-300">Gemini AI</span>
-              </div>
-              {getStatusBadge(connections.gemini)}
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Bot className="h-4 w-4 text-orange-400" />
-                <span className="text-sm text-slate-300">Ollama</span>
-              </div>
-              {getStatusBadge(connections.ollama)}
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <MessageSquare className="h-4 w-4 text-cyan-400" />
-                <span className="text-sm text-slate-300">Telegram</span>
-              </div>
-              {getStatusBadge(connections.telegram)}
-            </div>
+            {getStatusBadge(status?.market_data || false)}
           </div>
-        </CardContent>
-      </Card>
 
-      {/* System Status */}
-      <Card className="bg-slate-800/50 border-slate-700">
-        <CardHeader>
-          <CardTitle className="text-white text-sm">System Status</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Trading Engine</span>
-            <Badge variant="outline" className={systemStatus.is_running ? 'border-green-400 text-green-400' : 'border-red-400 text-red-400'}>
-              {systemStatus.is_running ? 'Running' : 'Stopped'}
-            </Badge>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Active Trades</span>
-            <span className="text-white">{systemStatus.active_trades || 0}</span>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Total P&L</span>
-            <span className={`${(systemStatus.total_pnl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              ₹{(systemStatus.total_pnl || 0).toFixed(2)}
-            </span>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Health</span>
-            <span className="text-green-400">{systemStatus.system_health || 'OK'}</span>
-          </div>
-          {status?.last_update && (
-            <div className="text-xs text-slate-500 mt-2">
-              Last update: {new Date(status.last_update).toLocaleTimeString()}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Database className="h-4 w-4 text-blue-400" />
+              <span className="text-sm text-slate-300">Twelve Data</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            {getStatusBadge(status?.twelve_data || false)}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Bot className="h-4 w-4 text-green-400" />
+              <span className="text-sm text-slate-300">Gemini AI</span>
+            </div>
+            {getStatusBadge(status?.gemini || false)}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Brain className="h-4 w-4 text-orange-400" />
+              <span className="text-sm text-slate-300">Ollama</span>
+            </div>
+            {getStatusBadge(status?.ollama || false)}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <MessageSquare className="h-4 w-4 text-cyan-400" />
+              <span className="text-sm text-slate-300">Telegram</span>
+            </div>
+            {getStatusBadge(status?.telegram || false)}
+          </div>
+        </div>
+
+        {/* Last Update */}
+        {status?.timestamp && (
+          <div className="text-xs text-slate-500 text-center pt-2 border-t border-slate-700">
+            Last update: {new Date(status.timestamp).toLocaleString('en-IN')}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 };
 

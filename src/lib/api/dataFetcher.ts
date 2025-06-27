@@ -1,4 +1,3 @@
-
 import { ConfigManager } from '../config';
 
 export interface OHLCVData {
@@ -44,7 +43,7 @@ export class DataFetcher {
     this.baseURL = 'http://localhost:8000/api/v1';
   }
 
-  async fetchLiveOHLCV(symbol: string = 'NIFTY50'): Promise<OHLCVData[]> {
+  async fetchLiveOHLCV(symbol: string = 'NIFTY50'): Promise<OHLCVData[] | null> {
     try {
       const response = await fetch(`${this.baseURL}/live-ohlcv?symbol=${symbol}`, {
         headers: {
@@ -64,11 +63,11 @@ export class DataFetcher {
       }
     } catch (error) {
       console.error('Error fetching live OHLCV:', error);
-      return this.generateSimulatedOHLCV();
+      return null;
     }
   }
 
-  async fetchHistoricalOHLCV(symbol: string, startDate: string, endDate: string): Promise<OHLCVData[]> {
+  async fetchHistoricalOHLCV(symbol: string, startDate: string, endDate: string): Promise<OHLCVData[] | null> {
     try {
       const response = await fetch(`${this.baseURL}/historical-ohlcv?symbol=${symbol}&start_date=${startDate}&end_date=${endDate}`, {
         headers: {
@@ -88,13 +87,14 @@ export class DataFetcher {
       }
     } catch (error) {
       console.error('Error fetching historical OHLCV:', error);
-      return this.generateSimulatedOHLCV();
+      return null;
     }
   }
 
-  async fetchOptionChain(): Promise<OptionChainData[]> {
+  async fetchOptionChain(url?: string): Promise<OptionChainData[] | null> {
     try {
-      const response = await fetch(`${this.baseURL}/option-chain`, {
+      const endpoint = url ? `${this.baseURL}${url}` : `${this.baseURL}/option-chain`;
+      const response = await fetch(endpoint, {
         headers: {
           'Content-Type': 'application/json'
         }
@@ -112,11 +112,11 @@ export class DataFetcher {
       }
     } catch (error) {
       console.error('Error fetching option chain:', error);
-      return this.generateSimulatedOptionChain();
+      return null;
     }
   }
 
-  async fetchMarketData(): Promise<any> {
+  async fetchMarketData(): Promise<any | null> {
     try {
       const response = await fetch(`${this.baseURL}/market-data`, {
         headers: {
@@ -136,89 +136,8 @@ export class DataFetcher {
       }
     } catch (error) {
       console.error('Error fetching market data:', error);
-      return {
-        nifty: {
-          value: 19850.25 + (Math.random() - 0.5) * 100,
-          change: (Math.random() - 0.5) * 50,
-          percentChange: (Math.random() - 0.5) * 2
-        },
-        sensex: {
-          value: 66589.93 + (Math.random() - 0.5) * 500,
-          change: (Math.random() - 0.5) * 200,
-          percentChange: (Math.random() - 0.5) * 1.5
-        },
-        marketStatus: 'OPEN',
-        lastUpdate: new Date().toISOString(),
-        aiSentiment: {
-          direction: 'NEUTRAL',
-          confidence: 50
-        }
-      };
+      return null;
     }
-  }
-
-  private generateSimulatedOHLCV(): OHLCVData[] {
-    const data: OHLCVData[] = [];
-    let price = 19850;
-    const now = Date.now();
-
-    for (let i = 100; i >= 0; i--) {
-      const timestamp = now - i * 60000; // 1-minute intervals
-      const open = price;
-      const change = (Math.random() - 0.5) * 20;
-      const close = open + change;
-      const high = Math.max(open, close) + Math.random() * 10;
-      const low = Math.min(open, close) - Math.random() * 10;
-      const volume = Math.floor(Math.random() * 1000000) + 500000;
-
-      data.push({
-        timestamp,
-        open,
-        high,
-        low,
-        close,
-        volume
-      });
-
-      price = close;
-    }
-
-    return data;
-  }
-
-  private generateSimulatedOptionChain(): OptionChainData[] {
-    const basePrice = 19850;
-    const strikes = [];
-
-    for (let i = -5; i <= 5; i++) {
-      const strike = Math.round((basePrice + i * 50) / 50) * 50;
-      strikes.push({
-        strike,
-        expiry: '2024-06-27',
-        call: {
-          ltp: Math.max(1, basePrice - strike + Math.random() * 20),
-          volume: Math.floor(Math.random() * 200000) + 50000,
-          oi: Math.floor(Math.random() * 500000) + 100000,
-          iv: 15 + Math.random() * 10,
-          delta: Math.max(0, Math.min(1, (basePrice - strike) / 100 + 0.5)),
-          gamma: 0.01 + Math.random() * 0.1,
-          theta: -1 - Math.random() * 3,
-          vega: 10 + Math.random() * 10
-        },
-        put: {
-          ltp: Math.max(1, strike - basePrice + Math.random() * 20),
-          volume: Math.floor(Math.random() * 150000) + 30000,
-          oi: Math.floor(Math.random() * 400000) + 80000,
-          iv: 16 + Math.random() * 8,
-          delta: Math.max(-1, Math.min(0, (basePrice - strike) / 100 - 0.5)),
-          gamma: 0.01 + Math.random() * 0.1,
-          theta: -1 - Math.random() * 3,
-          vega: 10 + Math.random() * 10
-        }
-      });
-    }
-
-    return strikes;
   }
 
   private parseHistoricalData(data: any): OHLCVData[] {

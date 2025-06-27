@@ -74,7 +74,6 @@ class TelegramNotifier:
         if not self.bot_token:
             logger.warning("Telegram bot token not configured for connection test.")
             return False
-
         endpoint = f"https://api.telegram.org/bot{self.bot_token}/getMe"
         try:
             async with httpx.AsyncClient() as client:
@@ -94,3 +93,12 @@ class TelegramNotifier:
         except Exception as e:
             logger.error(f"An unexpected error occurred during Telegram connection test: {e}")
             return False
+
+    async def send_test_message(self, text: str = "Hi from Aria XT Quant Pulse!") -> bool:
+        """Send a test message to the configured Telegram chat."""
+        result = await self.send_message(text)
+        if result:
+            logger.info("Test message sent to Telegram successfully.")
+        else:
+            logger.error("Failed to send test message to Telegram.")
+        return result

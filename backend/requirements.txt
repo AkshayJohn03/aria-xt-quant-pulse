@@ -41,10 +41,6 @@ requests==2.32.3
 httpx==0.27.0
 aiohttp==3.9.5
 
-# Market Data Sources
-twelvedata==1.0.0
-yfinance==0.2.63  # Yahoo Finance data source (fallback for symbols not supported by Twelvedata)
-
 # Telegram Integration
 python-telegram-bot==21.0 # Compatible with Python 3.10+
 
