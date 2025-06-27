@@ -27,3 +27,15 @@ venv/
 .env
 __pycache__
 __pycache__/
+.joblib
+.pkl
+.csv
+.json
+.txt
+.xlsx
+.xls
+.docx
+.doc
+.pdf
+aria/data/converted/
+dataset/

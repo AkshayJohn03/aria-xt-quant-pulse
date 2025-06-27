@@ -1,0 +1,61 @@
+import pandas as pd
+import os
+
+# Define the path to your downloaded Kaggle dataset
+# IMPORTANT: Adjust this path to where you have saved 'NIFTY 100_minute_data.csv'
+# For example, if it's in a 'data' folder next to your script, it might be:
+# dataset_path = 'data/NIFTY 100_minute_data.csv'
+dataset_path = r'D:\aria\aria-xt-quant-pulse\dataset\raw\NIFTY 50_minute_data.csv' # Assuming this is your path
+
+print(f"Attempting to load dataset from: {dataset_path}")
+
+if not os.path.exists(dataset_path):
+    print(f"Error: Dataset not found at {dataset_path}. Please adjust the 'dataset_path' variable.")
+else:
+    try:
+        # Load the dataset
+        df = pd.read_csv(dataset_path)
+
+        print("\n--- Dataset Head (First 5 rows) ---")
+        print(df.head().to_string())
+
+        print("\n--- Dataset Info (Column types and non-null counts) ---")
+        df.info()
+
+        print("\n--- Dataset Description (Basic statistics) ---")
+        print(df.describe().to_string())
+
+        print("\n--- Check for 'Volume' column ---")
+        if 'Volume' in df.columns:
+            print(f" 'Volume' column found. Checking unique values:")
+            # If Volume exists, check if it's mostly zeros
+            print(df['Volume'].value_counts(dropna=False).head())
+        else:
+            print(" 'Volume' column NOT found.")
+            print(" Confirming the dataset is OHLC only (Open, High, Low, Close).")
+
+        print("\n--- Check for NaN values per column ---")
+        print(df.isnull().sum())
+
+        print("\n--- Date Range and Frequency (requires 'Date' and 'Time' columns) ---")
+        if 'Date' in df.columns and 'Time' in df.columns:
+            # Combine Date and Time into a datetime column
+            df['Datetime'] = pd.to_datetime(df['Date'] + ' ' + df['Time'])
+            df.set_index('Datetime', inplace=True)
+            df.sort_index(inplace=True)
+
+            print(f"Start Date: {df.index.min()}")
+            print(f"End Date: {df.index.max()}")
+            
+            # Calculate time differences to infer frequency
+            time_diffs = df.index.to_series().diff().dropna()
+            print(f"Most common time difference: {time_diffs.mode()[0] if not time_diffs.empty else 'N/A'}")
+            print(f"Unique time differences count: {time_diffs.nunique()}")
+            if time_diffs.nunique() > 1:
+                print(f"Warning: Non-uniform frequency detected. Top 5 unique diffs:\n{time_diffs.value_counts().head().to_string()}")
+        else:
+            print(" 'Date' and/or 'Time' columns not found. Cannot determine date range or frequency easily.")
+
+    except Exception as e:
+        print(f"An error occurred while processing the dataset: {e}")
+
