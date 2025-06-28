@@ -10,6 +10,8 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, Any, Optional, List, Tuple
 import httpx
+import torch
+from src.models.lstm_model import AriaXaTModel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -57,17 +59,30 @@ class ModelInterface:
             raise
 
     def _load_lstm_model(self):
-        """Load LSTM model for sequence prediction"""
+        """Load AriaXaTModel for sequence prediction"""
         try:
-            # In production, load actual model
-            # For now, return a mock model that simulates LSTM behavior
-            return {
-                'type': 'lstm',
-                'layers': [64, 32, 16],
-                'dropout': 0.2
-            }
+            # Load metadata for input features
+            metadata_path = self.config.get('metadata_path', None)
+            if metadata_path is None:
+                raise ValueError('metadata_path must be set in config for model loading')
+            import joblib
+            metadata = joblib.load(metadata_path)
+            input_features = metadata['num_features']
+            model = AriaXaTModel(
+                input_features=input_features,
+                hidden_size=self.config.get('lstm_hidden_size', 128),
+                num_layers=self.config.get('lstm_num_layers', 2),
+                output_classes=self.config.get('num_classes', 3),
+                dropout_rate=self.config.get('dropout_rate', 0.2)
+            )
+            model_path = self.config.get('model_path', None)
+            if model_path is None:
+                raise ValueError('model_path must be set in config for model loading')
+            model.load_state_dict(torch.load(model_path, map_location='cpu'))
+            model.eval()
+            return model
         except Exception as e:
-            logging.error(f"Error loading LSTM model: {e}")
+            logging.error(f"Error loading AriaXaTModel: {e}")
             raise
 
     def _load_xgboost_model(self):

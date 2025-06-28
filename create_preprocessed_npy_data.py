@@ -194,7 +194,7 @@ def calculate_technical_indicators(df):
     for col in df.columns:
         if df[col].dtype == np.float64: # Check if it's still float64 (some ta outputs might be)
             df[col] = df[col].astype(np.float32)
-
+    
     return df
 
 def add_time_features(df):
@@ -297,7 +297,7 @@ def run_preprocessing():
         
         if os.path.exists(expected_output_filepath):
             pre_existing_intermediate_paths.append(expected_output_filepath)
-        else:
+                else:
             files_to_process.append(os.path.join(config['raw_data_dir'], filename))
 
     print(f"Found {len(pre_existing_intermediate_paths)} files already processed. Will process {len(files_to_process)} new/missing files.")
@@ -434,7 +434,7 @@ def run_preprocessing():
             if i >= config['lookback_window'] - 1:
                 # Sequence map stores (symbol_name_str, relative_start_idx_in_symbol_df, relative_end_idx_in_symbol_df)
                 sequence_map.append((sym, i - (config['lookback_window'] - 1), i))
-        
+    
     print(f"Total sequences available for model training: {len(sequence_map)}")
 
     metadata = {

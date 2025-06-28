@@ -30,6 +30,7 @@ __pycache__/
 .joblib
 .pkl
 .csv
+.png
 .json
 .txt
 .xlsx
