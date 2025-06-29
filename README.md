@@ -191,3 +191,8 @@ This project is built with:
 - React
 - shadcn-ui
 - Tailwind CSS
+
+How to run frontend:
+
+- cd frontend
+- npm run dev
