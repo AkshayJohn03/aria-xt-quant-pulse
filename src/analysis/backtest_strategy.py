@@ -1,12 +1,17 @@
 import os
+os.environ['NUMBA_CAPTURED_ERRORS'] = 'stderr'
+os.environ['NUMBA_FULL_TRACEBACKS'] = '1'
 import joblib
 import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from src.models.lstm_model import AriaXaTModel
-from numba import njit # For Numba optimization
+from numba import njit, types # For Numba optimization
+from numba.typed import List # Correct import for List
 from datetime import datetime
 
 # --- Config ---
@@ -16,14 +21,27 @@ config = {
     'scaler_path': r'D:/aria/aria-xt-quant-pulse/aria/data/converted/models/scaler_xaat_minmaxscaler.pkl',
     'model_path': r'D:/aria/aria-xt-quant-pulse/aria/data/converted/models/best_aria_xat_model.pth',
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-    'initial_cash': 10_000, # INR
+    'initial_cash': 1_000_000, # INR - Increased for realistic Nifty trading
     'nifty_lot_size': 75, # Nifty 50 lot size
     'trade_risk_pct': 0.05, # % of capital risked per trade (e.g., 5%) - Adjusted for more realistic risk
     'slippage_pct': 0.0005, # 0.05% per side (consider typical Nifty slippage)
     'stop_loss_pct': 0.005, # 0.5% stop loss
     'take_profit_pct': 0.01, # 1% take profit
+    
+    # Advanced Strategy Parameters
     'max_trades_per_day': 10, # Max trades per day
-    'confidence_threshold': 0.6,
+    'confidence_threshold': 0.5, # Lowered from 0.6 to capture more signals
+    'force_exit_on_opposite_signal': True, # Exit position if model predicts opposite direction
+    'time_based_exit_hours': 4, # Exit position after N hours if no other exit signal
+    'use_dynamic_position_sizing': True, # Use volatility-based position sizing
+    'use_trailing_stop': True, # Enable trailing stop loss
+    'trailing_stop_pct': 0.003, # 0.3% trailing stop
+    'use_volatility_adjusted_stops': True, # Adjust stops based on ATR
+    'atr_multiplier_sl': 2.0, # ATR multiplier for stop loss
+    'atr_multiplier_tp': 4.0, # ATR multiplier for take profit
+    'min_confidence_for_short': 0.7, # Higher confidence required for short trades
+    'entry_only_mode': False, # If True, only take long positions (avoid shorting)
+    
     'batch_size': 4096, # For model inference
     # Zerodha/Indian costs (all INR) - Pass these to numba functions
     'brokerage_per_order': 20.0, # Must be float for numba
@@ -86,41 +104,116 @@ def _get_trade_lots_numba(cash, price, nifty_lot_size, trade_risk_pct):
     return lots
 
 
+# --- Advanced Utility Functions ---
+@njit
+def _get_dynamic_position_size_numba(cash, price, nifty_lot_size, trade_risk_pct, atr_value, base_atr):
+    """Dynamic position sizing based on volatility"""
+    if price <= 0 or cash <= 0 or atr_value <= 0:
+        return 0
+    
+    # Adjust risk based on volatility
+    volatility_factor = base_atr / atr_value if atr_value > 0 else 1.0
+    # Manual clip for scalar values (Numba-compatible)
+    if volatility_factor < 0.5:
+        volatility_factor = 0.5
+    elif volatility_factor > 2.0:
+        volatility_factor = 2.0
+    
+    # Adjust risked amount based on volatility
+    adjusted_risk_pct = trade_risk_pct * volatility_factor
+    risked_cash = cash * adjusted_risk_pct
+    
+    # Calculate lots
+    max_affordable_lots = int(cash // (price * nifty_lot_size))
+    risked_lots = int(risked_cash // (price * nifty_lot_size))
+    
+    if risked_lots == 0 and max_affordable_lots >= 1:
+        lots = 1
+    elif risked_lots > 0:
+        lots = min(risked_lots, max_affordable_lots)
+    else:
+        lots = 0
+    
+    return lots
+
+@njit
+def _get_volatility_adjusted_stops_numba(price, atr_value, atr_multiplier_sl, atr_multiplier_tp):
+    """Calculate volatility-adjusted stop loss and take profit"""
+    if atr_value <= 0:
+        return 0.005, 0.01  # Default values
+    
+    sl_pct = (atr_value * atr_multiplier_sl) / price
+    tp_pct = (atr_value * atr_multiplier_tp) / price
+    
+    # Manual clip for scalar values (Numba-compatible)
+    if sl_pct < 0.002:
+        sl_pct = 0.002
+    elif sl_pct > 0.02:
+        sl_pct = 0.02
+    
+    if tp_pct < 0.005:
+        tp_pct = 0.005
+    elif tp_pct > 0.05:
+        tp_pct = 0.05
+    
+    return sl_pct, tp_pct
+
+@njit
+def _update_trailing_stop_numba(current_price, entry_price, current_trailing_stop, trailing_stop_pct, position_side):
+    """Update trailing stop based on current price movement"""
+    if position_side == 0:  # Long position
+        if current_price > entry_price:
+            new_trailing_stop = current_price * (1 - trailing_stop_pct)
+            return max(new_trailing_stop, current_trailing_stop)
+    else:  # Short position
+        if current_price < entry_price:
+            new_trailing_stop = current_price * (1 + trailing_stop_pct)
+            return min(new_trailing_stop, current_trailing_stop) if current_trailing_stop > 0 else new_trailing_stop
+    
+    return current_trailing_stop
+
+
 # --- Numba Main Backtest Loop ---
 @njit
 def _run_backtest_numba(
     unscaled_prices, pred_classes, confidences, actual_labels, timestamps_numeric, # seconds_since_epoch for holding
     date_ordinals, # NEW: for daily trade reset
+    atr_values, # ATR values for volatility-adjusted stops and position sizing
     initial_cash, nifty_lot_size, trade_risk_pct, slippage_pct,
     stop_loss_pct, take_profit_pct, max_trades_per_day, confidence_threshold,
-    brokerage_per_order, stt_sell_pct, exchange_txn_pct, sebi_charges_per_cr, stamp_duty_buy_pct, gst_pct
+    brokerage_per_order, stt_sell_pct, exchange_txn_pct, sebi_charges_per_cr, stamp_duty_buy_pct, gst_pct,
+    # Advanced parameters
+    force_exit_on_opposite_signal, time_based_exit_hours, use_dynamic_position_sizing,
+    use_trailing_stop, trailing_stop_pct, use_volatility_adjusted_stops,
+    atr_multiplier_sl, atr_multiplier_tp, min_confidence_for_short, entry_only_mode
 ):
     current_cash = initial_cash
     current_position = 0 # In lots
     current_entry_price = 0.0
     current_entry_time_numeric = 0.0 # Storing timestamps as floats for Numba
+    current_trailing_stop = 0.0 # For trailing stop functionality
 
     # Trade log (list of tuples for Numba)
     # (type_code, datetime_numeric, price, lots, side_code, pnl, cash_after, holding_min, reason_code)
     # type_code: 0=BUY, 1=SELL, 2=EXIT, 3=FINAL_EXIT
     # side_code: 0=LONG, 1=SHORT
-    # reason_code: 0=model_exit, 1=stop_loss, 2=take_profit, 3=final_exit
+    # reason_code: 0=model_exit, 1=stop_loss, 2=take_profit, 3=final_exit, 4=trailing_stop, 5=time_exit, 6=opposite_signal
     trade_log_list = []
-    equity_curve = []
-    drawdown_curve = []
+    equity_curve = List.empty_list(types.float64)
+    drawdown_curve = List.empty_list(types.float64)
 
     max_equity = initial_cash
     trades_today = 0
     last_trade_date_ordinal = -1 # Initialize with an invalid date to ensure first day reset
+    
+    # Calculate base ATR for dynamic position sizing
+    base_atr = np.mean(atr_values) if len(atr_values) > 0 else 100.0
 
     N = len(unscaled_prices)
 
     # Defensive: Numba-safe check for empty input
     if N == 0:
-        empty_trade_log = np.empty((0, 9), dtype=np.float64)
-        empty_equity = np.empty((0,), dtype=np.float64)
-        empty_drawdown = np.empty((0,), dtype=np.float64)
-        return empty_trade_log, empty_equity, empty_drawdown
+        return trade_log_list, equity_curve, drawdown_curve
 
     for i in range(N):
         # Defensive: check index bounds (Numba-safe, no print)
@@ -142,34 +235,68 @@ def _run_backtest_numba(
 
         # --- Exit logic (stop-loss, take-profit, model signal) ---
         if current_position != 0:
+            # Get volatility-adjusted stops if enabled
+            current_sl_pct = stop_loss_pct
+            current_tp_pct = take_profit_pct
+            if use_volatility_adjusted_stops and i < len(atr_values):
+                current_sl_pct, current_tp_pct = _get_volatility_adjusted_stops_numba(
+                    price, atr_values[i], atr_multiplier_sl, atr_multiplier_tp
+                )
+            
+            # Update trailing stop if enabled
+            if use_trailing_stop:
+                current_trailing_stop = _update_trailing_stop_numba(
+                    price, current_entry_price, current_trailing_stop, trailing_stop_pct, 
+                    0 if current_position > 0 else 1
+                )
+            
             # Calculate P&L if we were to exit now for potential stop/profit checks
             move_percentage = (price - current_entry_price) / current_entry_price
             
             stop_hit = False
             tp_hit = False
+            trailing_stop_hit = False
+            time_exit = False
+            opposite_signal_exit = False
             
             if current_position > 0: # Long position
-                if move_percentage <= -stop_loss_pct:
+                if move_percentage <= -current_sl_pct:
                     stop_hit = True
-                elif move_percentage >= take_profit_pct:
+                elif move_percentage >= current_tp_pct:
                     tp_hit = True
+                elif use_trailing_stop and current_trailing_stop > 0 and price <= current_trailing_stop:
+                    trailing_stop_hit = True
             elif current_position < 0: # Short position
-                if move_percentage >= stop_loss_pct: # Price moved up for short is loss
+                if move_percentage >= current_sl_pct: # Price moved up for short is loss
                     stop_hit = True
-                elif move_percentage <= -take_profit_pct: # Price moved down for short is profit
+                elif move_percentage <= -current_tp_pct: # Price moved down for short is profit
                     tp_hit = True
-
-            # Model exit signal
+                elif use_trailing_stop and current_trailing_stop > 0 and price >= current_trailing_stop:
+                    trailing_stop_hit = True
+            
+            # Time-based exit
+            if time_based_exit_hours > 0:
+                holding_hours = (current_timestamp - current_entry_time_numeric) / 3600.0
+                if holding_hours >= time_based_exit_hours:
+                    time_exit = True
+            
+            # Model exit signal (including opposite signal exit)
             model_exit = False
-            if confidence >= confidence_threshold: # Only consider high confidence model exits
+            if confidence >= confidence_threshold:
                 if pred_class == 1: # Model predicts HOLD
                     model_exit = True
                 elif current_position > 0 and pred_class == 0: # Long and model predicts SELL (PUT)
-                    model_exit = True
+                    if force_exit_on_opposite_signal:
+                        opposite_signal_exit = True
+                    else:
+                        model_exit = True
                 elif current_position < 0 and pred_class == 2: # Short and model predicts BUY (CALL)
-                    model_exit = True
+                    if force_exit_on_opposite_signal:
+                        opposite_signal_exit = True
+                    else:
+                        model_exit = True
 
-            if stop_hit or tp_hit or model_exit:
+            if stop_hit or tp_hit or model_exit or trailing_stop_hit or time_exit or opposite_signal_exit:
                 exit_side_code = 1 if current_position > 0 else 0 # 1=sell (for long exit), 0=buy (for short exit)
                 exit_price = _apply_slippage_numba(price, exit_side_code, slippage_pct)
                 
@@ -195,6 +322,12 @@ def _run_backtest_numba(
                     reason_code = 1
                 elif tp_hit:
                     reason_code = 2
+                elif trailing_stop_hit:
+                    reason_code = 4
+                elif time_exit:
+                    reason_code = 5
+                elif opposite_signal_exit:
+                    reason_code = 6
 
                 trade_log_list.append((
                     np.int64(2),
@@ -210,70 +343,92 @@ def _run_backtest_numba(
                 current_position = 0
                 current_entry_price = 0.0
                 current_entry_time_numeric = 0.0
+                current_trailing_stop = 0.0
                 trades_today += 1
 
         # --- Entry logic ---
         if current_position == 0 and confidence >= confidence_threshold and trades_today < max_trades_per_day:
-            lots = _get_trade_lots_numba(current_cash, price, nifty_lot_size, trade_risk_pct)
+            # Check if we should take this signal
+            should_take_signal = True
             
-            if lots > 0: # Can afford to trade at least one lot
-                if pred_class == 2: # BUY CALL (LONG)
-                    entry_side_code = 0 # 0=buy
-                    entry_price = _apply_slippage_numba(price, entry_side_code, slippage_pct)
-                    trade_value = lots * nifty_lot_size * entry_price
-                    costs = _get_trade_costs_numba(trade_value, entry_side_code,
-                                                   brokerage_per_order, stt_sell_pct, exchange_txn_pct,
-                                                   sebi_charges_per_cr, stamp_duty_buy_pct, gst_pct)
-                    
-                    total_cost = trade_value + costs
-                    
-                    if current_cash >= total_cost:
-                        current_cash -= total_cost
-                        current_position = lots
-                        current_entry_price = entry_price
-                        current_entry_time_numeric = current_timestamp
-                        trade_log_list.append((
-                            np.int64(0),
-                            np.float64(current_timestamp),
-                            np.float64(entry_price),
-                            np.int64(lots),
-                            np.int64(0),
-                            np.float64(0.0),
-                            np.float64(current_cash),
-                            np.float64(0.0),
-                            np.int64(-1)
-                        ))
-                        trades_today += 1
-                elif pred_class == 0: # BUY PUT (SHORT)
-                    entry_side_code = 1 # 1=sell (for short entry)
-                    entry_price = _apply_slippage_numba(price, entry_side_code, slippage_pct)
-                    trade_value = lots * nifty_lot_size * entry_price
-                    costs = _get_trade_costs_numba(trade_value, entry_side_code,
-                                                   brokerage_per_order, stt_sell_pct, exchange_txn_pct,
-                                                   sebi_charges_per_cr, stamp_duty_buy_pct, gst_pct)
-                    
-                    # For short, initial capital is just for costs, margin assumed elsewhere.
-                    # This assumes you have enough margin beyond the initial cash to cover the notional value.
-                    # In a simplified backtest, we just deduct costs from current cash.
-                    total_cost_for_short_entry = costs 
-                    
-                    if current_cash >= total_cost_for_short_entry:
-                        current_cash -= total_cost_for_short_entry
-                        current_position = -lots # Negative for short position
-                        current_entry_price = entry_price
-                        current_entry_time_numeric = current_timestamp
-                        trade_log_list.append((
-                            np.int64(1),
-                            np.float64(current_timestamp),
-                            np.float64(entry_price),
-                            np.int64(lots),
-                            np.int64(1),
-                            np.float64(0.0),
-                            np.float64(current_cash),
-                            np.float64(0.0),
-                            np.int64(-1)
-                        ))
-                        trades_today += 1
+            # Higher confidence required for short trades
+            if pred_class == 0 and confidence < min_confidence_for_short:
+                should_take_signal = False
+            
+            # Entry-only mode: only take long positions
+            if entry_only_mode and pred_class == 0:
+                should_take_signal = False
+            
+            if should_take_signal:
+                # Use dynamic position sizing if enabled
+                if use_dynamic_position_sizing and i < len(atr_values):
+                    lots = _get_dynamic_position_size_numba(
+                        current_cash, price, nifty_lot_size, trade_risk_pct, 
+                        atr_values[i], base_atr
+                    )
+                else:
+                    lots = _get_trade_lots_numba(current_cash, price, nifty_lot_size, trade_risk_pct)
+                
+                if lots > 0: # Can afford to trade at least one lot
+                    if pred_class == 2: # BUY CALL (LONG)
+                        entry_side_code = 0 # 0=buy
+                        entry_price = _apply_slippage_numba(price, entry_side_code, slippage_pct)
+                        trade_value = lots * nifty_lot_size * entry_price
+                        costs = _get_trade_costs_numba(trade_value, entry_side_code,
+                                                       brokerage_per_order, stt_sell_pct, exchange_txn_pct,
+                                                       sebi_charges_per_cr, stamp_duty_buy_pct, gst_pct)
+                        
+                        total_cost = trade_value + costs
+                        
+                        if current_cash >= total_cost:
+                            current_cash -= total_cost
+                            current_position = lots
+                            current_entry_price = entry_price
+                            current_entry_time_numeric = current_timestamp
+                            current_trailing_stop = 0.0
+                            trade_log_list.append((
+                                np.int64(0),
+                                np.float64(current_timestamp),
+                                np.float64(entry_price),
+                                np.int64(lots),
+                                np.int64(0),
+                                np.float64(0.0),
+                                np.float64(current_cash),
+                                np.float64(0.0),
+                                np.int64(-1)
+                            ))
+                            trades_today += 1
+                    elif pred_class == 0: # BUY PUT (SHORT)
+                        entry_side_code = 1 # 1=sell (for short entry)
+                        entry_price = _apply_slippage_numba(price, entry_side_code, slippage_pct)
+                        trade_value = lots * nifty_lot_size * entry_price
+                        costs = _get_trade_costs_numba(trade_value, entry_side_code,
+                                                       brokerage_per_order, stt_sell_pct, exchange_txn_pct,
+                                                       sebi_charges_per_cr, stamp_duty_buy_pct, gst_pct)
+                        
+                        # For short, initial capital is just for costs, margin assumed elsewhere.
+                        # This assumes you have enough margin beyond the initial cash to cover the notional value.
+                        # In a simplified backtest, we just deduct costs from current cash.
+                        total_cost_for_short_entry = costs 
+                        
+                        if current_cash >= total_cost_for_short_entry:
+                            current_cash -= total_cost_for_short_entry
+                            current_position = -lots # Negative for short position
+                            current_entry_price = entry_price
+                            current_entry_time_numeric = current_timestamp
+                            current_trailing_stop = 0.0
+                            trade_log_list.append((
+                                np.int64(1),
+                                np.float64(current_timestamp),
+                                np.float64(entry_price),
+                                np.int64(lots),
+                                np.int64(1),
+                                np.float64(0.0),
+                                np.float64(current_cash),
+                                np.float64(0.0),
+                                np.int64(-1)
+                            ))
+                            trades_today += 1
 
         # --- Equity curve and drawdown ---
         # Calculate current equity: cash + (unrealized P&L if position open)
@@ -326,7 +481,7 @@ def _run_backtest_numba(
             np.int64(3)
         ))
     
-    return np.array(trade_log_list), np.array(equity_curve), np.array(drawdown_curve)
+    return trade_log_list, equity_curve, drawdown_curve
 
 
 # --- Load Artifacts ---
@@ -367,6 +522,23 @@ print('Loading model weights...')
 model.load_state_dict(torch.load(config['model_path'], map_location=config['device']))
 model.eval()
 print('Model loaded and set to eval mode.')
+
+# --- Configuration Summary ---
+print('\n=== ADVANCED BACKTEST CONFIGURATION ===')
+print(f"Initial Capital: ₹{config['initial_cash']:,.0f}")
+print(f"Confidence Threshold: {config['confidence_threshold']}")
+print(f"Min Confidence for Short: {config['min_confidence_for_short']}")
+print(f"Trade Risk: {config['trade_risk_pct']*100:.1f}%")
+print(f"Stop Loss: {config['stop_loss_pct']*100:.1f}%")
+print(f"Take Profit: {config['take_profit_pct']*100:.1f}%")
+print(f"Max Trades/Day: {config['max_trades_per_day']}")
+print(f"Dynamic Position Sizing: {'ENABLED' if config['use_dynamic_position_sizing'] else 'DISABLED'}")
+print(f"Volatility-Adjusted Stops: {'ENABLED' if config['use_volatility_adjusted_stops'] else 'DISABLED'}")
+print(f"Trailing Stop: {'ENABLED' if config['use_trailing_stop'] else 'DISABLED'}")
+print(f"Force Exit on Opposite Signal: {'ENABLED' if config['force_exit_on_opposite_signal'] else 'DISABLED'}")
+print(f"Time-Based Exit: {'ENABLED' if config['time_based_exit_hours'] > 0 else 'DISABLED'}")
+print(f"Entry-Only Mode: {'ENABLED' if config['entry_only_mode'] else 'DISABLED'}")
+print("=== END CONFIGURATION ===\n")
 
 print('Loading processed data...')
 df_raw = joblib.load(config['processed_data_path'])
@@ -521,22 +693,126 @@ for name, arr in arrays.items():
         print(f"  ERROR: {name} length {len(arr)} != df_backtest length {len(df_backtest)}")
 print("==== END SANITY CHECK ====")
 
+# Compute base_atr and atr_values for diagnostics and advanced feature analysis
+base_atr = np.mean(df_backtest['atr'].values) if 'atr' in df_backtest.columns else 100.0
+atr_values = df_backtest['atr'].values if 'atr' in df_backtest.columns else np.ones(len(df_backtest)) * 100.0
+
 # --- Run Numba Backtest ---
 trade_log_raw, equity_curve_np, drawdown_curve_np = _run_backtest_numba(
     unscaled_close_prices, pred_classes_np, confidences_np, actual_labels_np,
     seconds_since_epoch, # Pass seconds_since_epoch for holding period
     date_ordinals_np, # Pass date_ordinals_np for daily reset
+    df_backtest['atr'].values, # Pass ATR values for volatility-adjusted stops and position sizing
     config['initial_cash'], config['nifty_lot_size'], config['trade_risk_pct'], config['slippage_pct'],
     config['stop_loss_pct'], config['take_profit_pct'], config['max_trades_per_day'], config['confidence_threshold'],
     config['brokerage_per_order'], config['stt_sell_pct'], config['exchange_txn_pct'],
-    config['sebi_charges_per_cr'], config['stamp_duty_buy_pct'], config['gst_pct']
+    config['sebi_charges_per_cr'], config['stamp_duty_buy_pct'], config['gst_pct'],
+    config['force_exit_on_opposite_signal'], config['time_based_exit_hours'], config['use_dynamic_position_sizing'],
+    config['use_trailing_stop'], config['trailing_stop_pct'], config['use_volatility_adjusted_stops'],
+    config['atr_multiplier_sl'], config['atr_multiplier_tp'], config['min_confidence_for_short'], config['entry_only_mode']
 )
+
+# Convert to np.array outside the njit function
+trade_log_raw = np.array(trade_log_raw)
+equity_curve_np = np.array(equity_curve_np)
+drawdown_curve_np = np.array(drawdown_curve_np)
+
+# --- Diagnostic Information ---
+print(f"\n=== DIAGNOSTIC INFORMATION ===")
+print(f"Total data points: {len(pred_classes_np)}")
+print(f"Prediction distribution:")
+print(f"  Class 0 (SELL/PUT): {np.sum(pred_classes_np == 0)} ({np.sum(pred_classes_np == 0)/len(pred_classes_np)*100:.1f}%)")
+print(f"  Class 1 (HOLD): {np.sum(pred_classes_np == 1)} ({np.sum(pred_classes_np == 1)/len(pred_classes_np)*100:.1f}%)")
+print(f"  Class 2 (BUY/CALL): {np.sum(pred_classes_np == 2)} ({np.sum(pred_classes_np == 2)/len(pred_classes_np)*100:.1f}%)")
+
+print(f"\nConfidence statistics:")
+print(f"  Min confidence: {np.min(confidences_np):.3f}")
+print(f"  Max confidence: {np.max(confidences_np):.3f}")
+print(f"  Mean confidence: {np.mean(confidences_np):.3f}")
+print(f"  Confidence threshold: {config['confidence_threshold']}")
+print(f"  Points above threshold: {np.sum(confidences_np >= config['confidence_threshold'])} ({np.sum(confidences_np >= config['confidence_threshold'])/len(confidences_np)*100:.1f}%)")
+
+# Check potential trade opportunities
+high_conf_mask = confidences_np >= config['confidence_threshold']
+high_conf_preds = pred_classes_np[high_conf_mask]
+print(f"\nHigh confidence predictions (>= {config['confidence_threshold']}):")
+print(f"  Class 0 (SELL/PUT): {np.sum(high_conf_preds == 0)}")
+print(f"  Class 1 (HOLD): {np.sum(high_conf_preds == 1)}")
+print(f"  Class 2 (BUY/CALL): {np.sum(high_conf_preds == 2)}")
+
+# Check if we can afford trades
+avg_price = np.mean(unscaled_close_prices)
+min_price = np.min(unscaled_close_prices)
+max_price = np.max(unscaled_close_prices)
+lot_cost_avg = avg_price * config['nifty_lot_size']
+lot_cost_min = min_price * config['nifty_lot_size']
+lot_cost_max = max_price * config['nifty_lot_size']
+risk_amount = config['initial_cash'] * config['trade_risk_pct']
+
+print(f"\nTrading affordability:")
+print(f"  Initial cash: ₹{config['initial_cash']:,.0f}")
+print(f"  Risk per trade (5%): ₹{risk_amount:,.0f}")
+print(f"  Average lot cost: ₹{lot_cost_avg:,.0f}")
+print(f"  Min lot cost: ₹{lot_cost_min:,.0f}")
+print(f"  Max lot cost: ₹{lot_cost_max:,.0f}")
+print(f"  Can afford 1 lot at avg price: {'Yes' if risk_amount >= lot_cost_avg else 'No'}")
+print(f"  Can afford 1 lot at min price: {'Yes' if risk_amount >= lot_cost_min else 'No'}")
+
+print(f"\nNumber of trades made: {len(trade_log_raw)}")
+print("=== END DIAGNOSTIC ===\n")
+
+# --- Enhanced Trade Analysis ---
+if len(trade_log_raw) > 0:
+    print("=== ADVANCED FEATURE ANALYSIS ===")
+    
+    # Define reason mapping for analysis
+    reason_map_analysis = {0: 'model_exit', 1: 'stop_loss', 2: 'take_profit', 3: 'final_exit', 
+                          4: 'trailing_stop', 5: 'time_exit', 6: 'opposite_signal'}
+    
+    exit_reasons = [trade_tuple[8] for trade_tuple in trade_log_raw if trade_tuple[0] in [2, 3]]  # Exit trades only
+    
+    if exit_reasons:
+        reason_counts = {}
+        for reason in exit_reasons:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        
+        print("Exit reasons breakdown:")
+        for reason_code, count in reason_counts.items():
+            reason_name = reason_map_analysis.get(reason_code, f'Unknown_{reason_code}')
+            percentage = (count / len(exit_reasons)) * 100
+            print(f"  {reason_name}: {count} ({percentage:.1f}%)")
+    
+    # Analyze position sizing
+    if config['use_dynamic_position_sizing']:
+        print(f"\nDynamic position sizing: ENABLED")
+        print(f"  Base ATR: {base_atr:.2f}")
+        print(f"  ATR range: {np.min(atr_values):.2f} - {np.max(atr_values):.2f}")
+    
+    # Analyze volatility-adjusted stops
+    if config['use_volatility_adjusted_stops']:
+        print(f"\nVolatility-adjusted stops: ENABLED")
+        print(f"  ATR multipliers - SL: {config['atr_multiplier_sl']}, TP: {config['atr_multiplier_tp']}")
+    
+    if config['use_trailing_stop']:
+        print(f"\nTrailing stop: ENABLED ({config['trailing_stop_pct']*100:.1f}%)")
+    
+    if config['force_exit_on_opposite_signal']:
+        print(f"\nForce exit on opposite signal: ENABLED")
+    
+    if config['time_based_exit_hours'] > 0:
+        print(f"\nTime-based exit: ENABLED ({config['time_based_exit_hours']} hours)")
+    
+    if config['entry_only_mode']:
+        print(f"\nEntry-only mode: ENABLED (no short positions)")
+    
+    print("=== END ADVANCED FEATURE ANALYSIS ===\n")
 
 # --- Post-process Numba output ---
 trade_log = []
 type_map = {0: 'BUY', 1: 'SELL', 2: 'EXIT', 3: 'FINAL_EXIT'}
 side_map = {0: 'LONG', 1: 'SHORT'} # Represents position type
-reason_map = {0: 'model_exit', 1: 'stop_loss', 2: 'take_profit', 3: 'final_exit'}
+reason_map = {0: 'model_exit', 1: 'stop_loss', 2: 'take_profit', 3: 'final_exit', 
+              4: 'trailing_stop', 5: 'time_exit', 6: 'opposite_signal'}
 
 for trade_tuple in trade_log_raw:
     trade_type, dt_numeric, price, lots, pos_side_code, pnl, cash_after, holding_sec, reason_code = trade_tuple
@@ -561,6 +837,10 @@ trade_log_df.to_csv(log_path, index=False)
 print(f"Trade log saved to {log_path}")
 
 # --- Performance Metrics ---
+if trade_log_df.empty or 'type' not in trade_log_df.columns:
+    print("WARNING: No trades were made or trade log is empty. Skipping metrics and plots.")
+    import sys; sys.exit(0)
+
 def calc_metrics(trades_df, equity_curve_array, initial_cash):
     final_cash = equity_curve_array[-1] if len(equity_curve_array) > 0 else initial_cash
     total_return = (final_cash - initial_cash) / initial_cash * 100 if initial_cash > 0 else 0
