@@ -1,86 +1,128 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
+interface MarketDataPoint {
+  value: number;
+  change: number;
+  percentChange: number;
+  high: number;
+  low: number;
+  volume: number;
+  timestamp: string | null;
+  source: string;
+}
+
 interface MarketData {
-  nifty50: {
-    value: number;
-    change: number;
-    percentChange: number;
-    high: number;
-    low: number;
-    volume: number;
-    timestamp: string | null;
-    source: string;
-  };
-  banknifty: {
-    value: number;
-    change: number;
-    percentChange: number;
-    high: number;
-    low: number;
-    volume: number;
-    timestamp: string | null;
-    source: string;
-  };
+  nifty: MarketDataPoint;
+  nifty50: MarketDataPoint; // Backward compatibility alias
+  banknifty: MarketDataPoint;
 }
 
 export const useMarketData = () => {
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [isMarketOpen, setIsMarketOpen] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  const fetchMarketData = async () => {
+    try {
+      console.log('Fetching market data from backend...');
+      const response = await axios.get('/api/v1/market-data', {
+        timeout: 10000
+      });
+      
+      console.log('Market data response:', response.data);
+      
+      if (response.data.success && response.data.data) {
+        const data = response.data.data;
+        
+        // Transform backend response to expected format
+        const niftyData = data.nifty || {
+          value: 24000,
+          change: 0,
+          percentChange: 0,
+          high: 24000,
+          low: 24000,
+          volume: 0,
+          timestamp: new Date().toISOString(),
+          source: 'fallback'
+        };
+
+        const bankniftyData = data.banknifty || {
+          value: 51000,
+          change: 0,
+          percentChange: 0,
+          high: 51000,
+          low: 51000,
+          volume: 0,
+          timestamp: new Date().toISOString(),
+          source: 'fallback'
+        };
+
+        const transformedData: MarketData = {
+          nifty: niftyData,
+          nifty50: niftyData, // Provide alias for backward compatibility
+          banknifty: bankniftyData
+        };
+        
+        setMarketData(transformedData);
+        setError(null);
+        console.log('Market data updated:', transformedData);
+      } else {
+        const errorMsg = response.data.error || 'Failed to fetch market data';
+        console.error('Market data fetch failed:', errorMsg);
+        setError(`Backend: ${errorMsg}`);
+      }
+    } catch (err: any) {
+      const errorMsg = err.code === 'ERR_NETWORK' 
+        ? 'Backend server not running. Please start the backend server.'
+        : err.response?.data?.error || err.message || 'Failed to fetch market data';
+      
+      console.error('Market data fetch error:', err);
+      setError(errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMarketStatus = async () => {
+    try {
+      const response = await axios.get('/api/v1/market-status', {
+        timeout: 5000
+      });
+      if (response.data.success && typeof response.data.data?.is_open === 'boolean') {
+        setIsMarketOpen(response.data.data.is_open);
+      }
+    } catch (err) {
+      console.error('Error fetching market status:', err);
+      // Set market status based on IST time (9:15 AM to 3:30 PM on weekdays)
+      const now = new Date();
+      const istTime = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+      const day = istTime.getDay();
+      const hour = istTime.getHours();
+      const minute = istTime.getMinutes();
+      const totalMinutes = hour * 60 + minute;
+      
+      const isWeekday = day >= 1 && day <= 5;
+      const isMarketHours = totalMinutes >= 555 && totalMinutes <= 930; // 9:15 AM to 3:30 PM
+      
+      setIsMarketOpen(isWeekday && isMarketHours);
+    }
+  };
 
   useEffect(() => {
-    let dataInterval: NodeJS.Timeout | null = null;
-    let statusInterval: NodeJS.Timeout | null = null;
-    const fetchMarketData = async () => {
-      try {
-        const response = await axios.get('/api/market-data');
-        if (response.data.success) {
-          setMarketData(response.data.data);
-          setError(null);
-        } else {
-          setMarketData(null);
-          setError(response.data.error || 'Failed to fetch market data');
-        }
-      } catch (err) {
-        setMarketData(null);
-        setError('Failed to fetch market data');
-        console.error('Error fetching market data:', err);
-      }
-    };
-
-    const fetchMarketStatus = async () => {
-      try {
-        const response = await axios.get('/api/market-status');
-        setIsMarketOpen(response.data.is_open);
-        setError(null);
-      } catch (err) {
-        setError('Failed to fetch market status');
-        console.error('Error fetching market status:', err);
-      }
-    };
-
     fetchMarketData();
     fetchMarketStatus();
 
-    if (!dataInterval) {
-      dataInterval = setInterval(() => {
-        console.log('Polling market data...');
-        fetchMarketData();
-      }, 30000); // Refresh every 30 seconds
-    }
-    if (!statusInterval) {
-      statusInterval = setInterval(() => {
-        console.log('Polling market status...');
-        fetchMarketStatus();
-      }, 30000); // Refresh every 30 seconds
-    }
+    // Poll every 30 seconds for market data
+    const dataInterval = setInterval(fetchMarketData, 30000);
+    const statusInterval = setInterval(fetchMarketStatus, 60000);
 
     return () => {
-      if (dataInterval) clearInterval(dataInterval);
-      if (statusInterval) clearInterval(statusInterval);
+      clearInterval(dataInterval);
+      clearInterval(statusInterval);
     };
   }, []);
 
-  return { marketData, isMarketOpen, error };
+  return { marketData, isMarketOpen, error, loading, refetch: fetchMarketData };
 }; 

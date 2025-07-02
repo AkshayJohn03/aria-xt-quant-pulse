@@ -71,7 +71,8 @@ export const ConnectionStatus: React.FC = () => {
             <span className="text-sm text-gray-500">{mod.label}</span>
             <span className="flex items-center space-x-1">
               <span className={`inline-block w-2 h-2 rounded-full ${status && status[mod.key] ? 'bg-green-500' : 'bg-red-500'}`}></span>
-              <Badge variant={status && status[mod.key] ? "success" : "destructive"}>
+              {/* <Badge variant={status && status[mod.key] ? "success" : "destructive"}> */}
+              <Badge variant={status && status[mod.key] ? "default" : "destructive"}>
                 {status && status[mod.key] ? 'Connected' : 'Offline'}
               </Badge>
             </span>
@@ -81,7 +82,8 @@ export const ConnectionStatus: React.FC = () => {
           <span className="text-sm text-gray-500">Market Status</span>
           <span className="flex items-center space-x-1">
             <span className={`inline-block w-2 h-2 rounded-full ${isMarketOpen ? 'bg-green-500' : 'bg-red-500'}`}></span>
-            <Badge variant={isMarketOpen ? "success" : "destructive"}>
+            {/* <Badge variant={isMarketOpen ? "success" : "destructive"}> */}
+            <Badge variant={isMarketOpen ? "default" : "destructive"}>
               {isMarketOpen ? 'Open' : 'Closed'}
             </Badge>
           </span>

@@ -1,6 +1,5 @@
-
 import { ConfigManager } from '../config';
-import { OHLCVData } from '../api/dataFetcher';
+import { OHLCVData } from '../dataFetcher';
 
 export interface TradingSignal {
   action: 'BUY' | 'SELL' | 'HOLD';

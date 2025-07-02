@@ -104,78 +104,9 @@ export function usePortfolio() {
   return { portfolio, loading, error };
 }
 
-export function useMarketData() {
-  const [marketData, setMarketData] = useState<MarketData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const fetchMarketData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response = await axios.get(`${API_BASE_URL}/market-data`);
-      if (response.data.success && response.data.data) {
-        setMarketData(response.data.data as MarketData);
-        setError(null);
-      } else {
-        const errorMsg = response.data.error || "Failed to fetch market data";
-        setError(errorMsg);
-        setMarketData(null);
-      }
-    } catch (err: any) {
-      const errorMsg = err.message || "Network error - is backend running?";
-      setError(errorMsg);
-      setMarketData(null);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  useEffect(() => {
-    fetchMarketData();
-    const interval = setInterval(fetchMarketData, 10000); // Poll every 10 seconds
-    return () => clearInterval(interval);
-  }, []);
 
-  return { marketData, loading, error, refetch: fetchMarketData };
-}
-
-export function useConnectionStatus() {
-  const [status, setStatus] = useState<any>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchStatus = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`${API_BASE_URL}/connection-status`);
-      if (response.data.success) {
-        setStatus(response.data.data);
-        setError(null);
-      } else {
-        const errorMsg = response.data.error || 'Failed to fetch connection status';
-        setError(errorMsg);
-        console.error('Connection status fetch failed:', errorMsg);
-        setStatus(null);
-      }
-    } catch (err: any) {
-      const errorMsg = err.message || 'Network error - is backend running?';
-      setError(errorMsg);
-      console.error('Connection status fetch error:', err);
-      setStatus(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 5000); // Refresh every 5 seconds
-    return () => clearInterval(interval);
-  }, []);
-
-  return { status, loading, error, refetch: fetchStatus };
-}
 
 export const usePredictions = () => {
   const [prediction, setPrediction] = useState(null);

@@ -1,4 +1,4 @@
-import { ConfigManager } from '../config';
+import { ConfigManager } from './config';
 
 export interface OHLCVData {
   timestamp: number;

@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Settings, Key, Shield, Brain, MessageSquare } from 'lucide-react';
-import { ConfigManager, AriaConfig } from '@/lib/config';
+import { ConfigManager, AriaConfig } from '@/lib/api/config';
 import { toast } from 'sonner';
 
 const ConfigurationPanel = () => {

@@ -1,4 +1,3 @@
-
 import { TradingSignal } from '../ai/modelInterface';
 import { ConfigManager } from '../config';
 
